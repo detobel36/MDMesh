@@ -115,7 +115,7 @@ class PolicyManager(
 
     /**
      * Configure global Private DNS host/IP on the device.
-     * API 28+ (Pie).
+     * API 29+ (Q).
      */
     fun setGlobalPrivateDns(dnsHost: String?): PolicyOutcome {
         val strategy = DnsPolicyFactory.create(handle) ?: return PolicyOutcome.Unsupported

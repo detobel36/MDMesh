@@ -19,7 +19,7 @@ with the agent's capability advertisement and the server's command catalog.
 | `passwordComplexity` | password policy | 31 | setRequiredPasswordComplexity (setPasswordQuality deprecated @26) |
 | `systemUpdatePolicy` | OS update windows | 24 | |
 | `factoryResetProtection` | FRP policy | 30 | setFactoryResetProtectionPolicy |
-| `dns` | global private DNS | 28 | setGlobalPrivateDnsModeSpecifiedHost |
+| `dns` | global private DNS | 29 | setGlobalPrivateDnsModeSpecifiedHost |
 
 ### appManagement
 | key | meaning | notes |
