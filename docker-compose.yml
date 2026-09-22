@@ -66,6 +66,7 @@ services:
         VITE_AGENT_CHECKSUM: ${VITE_AGENT_CHECKSUM:-}
         VITE_AGENT_APK_URL: ${VITE_AGENT_APK_URL:-}
     restart: unless-stopped
+    profiles: ["caddy", "cloudflare", "default", ""]
     depends_on:
       - server
       - supervisor
@@ -87,7 +88,6 @@ services:
       context: .
       dockerfile: docker/supervisor.Dockerfile
     restart: unless-stopped
-    working_dir: /project
     environment:
       GITHUB_REPO: ${GITHUB_REPO:-}
       UPDATE_CHANNEL: ${UPDATE_CHANNEL:-stable}

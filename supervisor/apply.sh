@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# apply.sh <target-version>
+# apply.sh <target-version> [web-zip-url]
 #
 # Runs inside the supervisor container (working_dir /project, docker.sock mounted). Applies a VERIFIED
-# update to the `server` + `caddy` services with a pre-update DB backup and AUTOMATIC ROLLBACK on any
+# update to the `server` + `caddy` (or host Nginx assets) services with a pre-update DB backup and AUTOMATIC ROLLBACK on any
 # failure. Emits `PHASE <name>` / `ERR <msg>` / `OK <version>` lines on stdout — server.js parses these
 # to drive /update/status. It NEVER touches `supervisor` or `postgres` (no self-destruct, no data loss).
 #
@@ -12,7 +12,8 @@
 # NOT exercised in CI/sandbox (needs a live Docker daemon). Validate on a staging deploy.
 set -uo pipefail   # deliberately NOT -e: failures are handled explicitly so we can roll back.
 
-VERSION="${1:?usage: apply.sh <version>}"
+VERSION="${1:?usage: apply.sh <version> [web-zip-url]}"
+WEB_ZIP_URL="${2:-}"
 PROJECT_DIR="${COMPOSE_PROJECT_DIR:-/project}"
 ENV_FILE="$PROJECT_DIR/.env"
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
@@ -89,18 +90,59 @@ phase pull
 set_env SERVER_VERSION "$VERSION"
 set_env WEB_VERSION "$VERSION"
 set_env CURRENT_VERSION "$VERSION"
-if ! dc pull server caddy; then
-  errln "image pull failed"
-  rollback
-  exit 1
+
+HOST_NGINX="$(get_env HOST_NGINX)"
+if [ "$HOST_NGINX" = "1" ]; then
+  if ! dc pull server; then
+    errln "image pull failed"
+    rollback
+    exit 1
+  fi
+else
+  if ! dc pull server caddy; then
+    errln "image pull failed"
+    rollback
+    exit 1
+  fi
 fi
 
 # ---------------- recreate ----------------
 phase recreate
-if ! dc up -d --no-deps server caddy; then
-  errln "recreate failed"
-  rollback
-  exit 1
+if [ "$HOST_NGINX" = "1" ]; then
+  if ! dc up -d --no-deps server; then
+    errln "recreate failed"
+    rollback
+    exit 1
+  fi
+
+  # Extract/update static web assets for host Nginx
+  WEB_DIR="$PROJECT_DIR/web_dist"
+  mkdir -p "$WEB_DIR"
+  UPDATED_WEB=0
+  if [ -n "$WEB_ZIP_URL" ]; then
+    TMP_ZIP=$(mktemp)
+    if curl -fsSL "$WEB_ZIP_URL" -o "$TMP_ZIP" 2>/dev/null; then
+      python3 -c "import zipfile; zipfile.ZipFile('$TMP_ZIP').extractall('$WEB_DIR')" 2>/dev/null && UPDATED_WEB=1
+    fi
+    rm -f "$TMP_ZIP"
+  fi
+
+  if [ "$UPDATED_WEB" != 1 ]; then
+    # Fallback to docker cp from web image
+    WEB_IMG_NAME="ghcr.io/$(get_env IMAGE_OWNER)/mdmesh-web:${VERSION}"
+    dc pull caddy 2>/dev/null || true
+    CID=$(docker create "$WEB_IMG_NAME" 2>/dev/null || true)
+    if [ -n "$CID" ]; then
+      docker cp "$CID:/srv/." "$WEB_DIR" 2>/dev/null || true
+      docker rm "$CID" >/dev/null 2>&1 || true
+    fi
+  fi
+else
+  if ! dc up -d --no-deps server caddy; then
+    errln "recreate failed"
+    rollback
+    exit 1
+  fi
 fi
 
 # ---------------- healthcheck ----------------

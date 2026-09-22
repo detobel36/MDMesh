@@ -7,7 +7,7 @@ const os = require('os');
 const cp = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
-const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches } = require('./lib');
+const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, webZipAsset, sha256Matches } = require('./lib');
 
 const PORT = +(process.env.SUPERVISOR_PORT || 9000);
 // Bind address. Docker keeps the default (all interfaces — the container has no published ports);
@@ -34,6 +34,7 @@ let currentVersion = process.env.CURRENT_VERSION || '0.0.0';
 let lastManifest = null;
 // Downloadable APK for the latest verified release {version,versionCode,sha256,url}; null if none.
 let lastApk = null;
+let lastWebZip = null;
 // Release notes / link / date for the picked release {notes,url,publishedAt}; null when no release.
 let lastRelease = null;
 // In-flight apply state surfaced via /update/status; null when no apply has run.
@@ -161,6 +162,7 @@ async function poll() {
     const manifest = (m && s) ? await verifyManifest(m.browser_download_url, s.browser_download_url) : null;
     lastManifest = manifest; // only verified manifests are ever stored (verifyManifest returns null otherwise)
     lastApk = manifest ? apkAsset(rel, manifest) : null;
+    lastWebZip = manifest ? webZipAsset(rel, manifest) : null;
     setStatus({ current: currentVersion, manifest, verified: !!manifest, checkedAt: Date.now(),
       error: manifest ? null : 'manifest missing or signature invalid' });
     if (lastApk) void ensureApk(); // warm the mirror cache (download+verify) so a rollout is instant
@@ -200,7 +202,8 @@ function startApply(trigger) {
 
   apply = { phase: 'authorizing', fromVersion: currentVersion, toVersion, trigger, startedAt: Date.now(), finishedAt: null, error: null };
   state.apply = apply;
-  spawnPhases([APPLY_SCRIPT, toVersion], (code) => {
+  const webZipUrl = lastWebZip ? lastWebZip.url : '';
+  spawnPhases([APPLY_SCRIPT, toVersion, webZipUrl], (code) => {
     if (code === 0) { currentVersion = toVersion; apply = { ...apply, phase: 'done', finishedAt: Date.now() }; }
     else if (!isTerminal(apply.phase)) { apply = { ...apply, phase: 'failed', finishedAt: Date.now() }; }
     else { apply = { ...apply, finishedAt: Date.now() }; }

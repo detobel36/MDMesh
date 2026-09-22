@@ -29,10 +29,11 @@ setenv() {
 }
 
 RESET=0
-NATIVE=0; NATIVE_ARGS=()
+NATIVE=0; NGINX_FLAG=0; NATIVE_ARGS=()
 for a in "$@"; do
   case "$a" in
     --native) NATIVE=1 ;;
+    --nginx)  NGINX_FLAG=1 ;;
     --reset)  RESET=1 ;;
     *)        NATIVE_ARGS+=("$a") ;;   # forwarded to the native installer (-y, -v)
   esac
@@ -69,6 +70,10 @@ if [ -f .env ] && [ "$RESET" != 1 ]; then
     MODE=1
     COMPOSE_ARGS="--profile cloudflare"
     EXTRA_NOTE="In Cloudflare, route the tunnel's public hostname ($HOST) to http://caddy:80."
+  elif [ "${HOST_NGINX:-0}" = "1" ] || [ "${COMPOSE_FILE:-}" = "docker-compose.yml:docker-compose.nginx.yml" ]; then
+    MODE=3
+    COMPOSE_ARGS="-f docker-compose.yml -f docker-compose.nginx.yml"
+    EXTRA_NOTE="Nginx on host proxies requests to Docker server/supervisor."
   else
     MODE=2
     COMPOSE_ARGS="-f docker-compose.yml -f docker-compose.domain.yml"
@@ -79,17 +84,30 @@ else
     warn "--reset: regenerating .env. If the old database still exists it needs the OLD password —"
     warn "run 'docker compose down -v' first for a genuinely clean slate."
   fi
-  echo "Hosting mode:"
-  echo "  1) Cloudflare Tunnel   (no open ports; Cloudflare manages TLS — needs a domain in Cloudflare)"
-  echo "  2) Your own domain     (open 80/443; Caddy auto-provisions a Let's Encrypt cert)"
-  MODE=""
-  while [ "$MODE" != "1" ] && [ "$MODE" != "2" ]; do
-    read -rp "Choose [1/2]: " MODE || { err "No selection (non-interactive run?). Aborting."; exit 1; }
-    case "$MODE" in 1|2) ;; *) warn "Please enter 1 or 2." ;; esac
-  done
+  if [ "$NGINX_FLAG" = 1 ]; then
+    MODE=3
+  else
+    echo "Hosting mode:"
+    echo "  1) Cloudflare Tunnel   (no open ports; Cloudflare manages TLS — needs a domain in Cloudflare)"
+    echo "  2) Your own domain     (open 80/443; Caddy auto-provisions a Let's Encrypt cert)"
+    echo "  3) Host Nginx          (use existing Nginx on host; reverse-proxies to Docker backend)"
+    MODE=""
+    while [ "$MODE" != "1" ] && [ "$MODE" != "2" ] && [ "$MODE" != "3" ]; do
+      read -rp "Choose [1/2/3]: " MODE || { err "No selection (non-interactive run?). Aborting."; exit 1; }
+      case "$MODE" in 1|2|3) ;; *) warn "Please enter 1, 2 or 3." ;; esac
+    done
+  fi
+
+  if [ "$MODE" = "3" ]; then
+    command -v nginx >/dev/null || { err "Nginx command not found on host! Aborting installation for Host Nginx mode."; exit 1; }
+  fi
 
   DB_PASSWORD=$(rand)
   HASH_SECRET=$(rand)
+
+  SERVER_PORT="8080"
+  SUPERVISOR_PORT="9000"
+  HOST_NGINX=0
 
   if [ "$MODE" = "1" ]; then
     read -rp "Public hostname devices will use (e.g. mdm.example.com): " HOST
@@ -101,7 +119,7 @@ else
     COMPOSE_FILE="docker-compose.yml"
     COMPOSE_PROFILES="cloudflare"
     EXTRA_NOTE="In Cloudflare, route the tunnel's public hostname ($HOST) to http://caddy:80."
-  else
+  elif [ "$MODE" = "2" ]; then
     read -rp "Your domain (DNS already pointing here, e.g. mdm.example.com): " HOST
     read -rp "Email for Let's Encrypt: " ACME_EMAIL
     BASE_URL="https://${HOST}"
@@ -111,6 +129,21 @@ else
     COMPOSE_FILE="docker-compose.yml:docker-compose.domain.yml"
     COMPOSE_PROFILES=""
     EXTRA_NOTE="Make sure ${HOST} resolves to this server and ports 80/443 are open."
+  else
+    read -rp "Your domain (DNS already pointing here, e.g. mdm.example.com): " HOST
+    read -rp "Backend Server port [8080]: " INP_SERVER_PORT
+    read -rp "Backend Supervisor port [9000]: " INP_SUPERVISOR_PORT
+    SERVER_PORT="${INP_SERVER_PORT:-8080}"
+    SUPERVISOR_PORT="${INP_SUPERVISOR_PORT:-9000}"
+    HOST_NGINX=1
+    BASE_URL="https://${HOST}"
+    SITE_ADDRESS="${HOST}"
+    ACME_EMAIL=""
+    TUNNEL_TOKEN=""
+    COMPOSE_ARGS="-f docker-compose.yml -f docker-compose.nginx.yml"
+    COMPOSE_FILE="docker-compose.yml:docker-compose.nginx.yml"
+    COMPOSE_PROFILES="none"
+    EXTRA_NOTE="Nginx configured at /etc/nginx/sites-available/mdmesh.conf."
   fi
 
   cat > .env <<EOF
@@ -139,6 +172,9 @@ AUTO_UPDATE=0
 COMPOSE_PROJECT_NAME=mdmesh
 COMPOSE_FILE=${COMPOSE_FILE}
 COMPOSE_PROFILES=${COMPOSE_PROFILES}
+SERVER_PORT=${SERVER_PORT}
+SUPERVISOR_PORT=${SUPERVISOR_PORT}
+HOST_NGINX=${HOST_NGINX}
 SMTP_HOST=
 SMTP_PORT=25
 SMTP_FROM=mdm@${HOST}
@@ -253,6 +289,79 @@ fi
 # aux-Headwind-app scrub. See install/sql/post_seed.sql for the rationale on each statement.
 if ! mdm_post_seed install/sql/post_seed.sql; then
   err "Post-seed repairs failed — device enrollment would not work. Fix the error above and re-run ./setup.sh."; exit 1
+fi
+
+# Configure host Nginx if in Host Nginx mode
+if [ "${HOST_NGINX:-0}" = "1" ]; then
+  say "Setting up Host Nginx web assets and configuration…"
+  WEB_DIR="$(pwd)/web_dist"
+  mkdir -p "$WEB_DIR"
+
+  # Fetch or extract web files
+  WEB_ZIP_URL=""
+  if [ -n "${GITHUB_REPO:-}" ] && command -v python3 >/dev/null && command -v curl >/dev/null; then
+    AUTH=(); [ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    REL=$(curl -fsSL "${AUTH[@]}" "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null || true)
+    WEB_ZIP_URL=$(printf '%s' "$REL" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(next((a["browser_download_url"] for a in d.get("assets",[]) if a["name"]=="mdmesh-web.zip"),""))' 2>/dev/null || true)
+  fi
+
+  EXTRACTED=0
+  if [ -n "$WEB_ZIP_URL" ]; then
+    TMP_ZIP=$(mktemp)
+    if curl -fsSL "${AUTH[@]}" "$WEB_ZIP_URL" -o "$TMP_ZIP" 2>/dev/null; then
+      if command -v unzip >/dev/null; then
+        unzip -q -o "$TMP_ZIP" -d "$WEB_DIR" && EXTRACTED=1
+      elif command -v python3 >/dev/null; then
+        python3 -c "import zipfile; zipfile.ZipFile('$TMP_ZIP').extractall('$WEB_DIR')" && EXTRACTED=1
+      fi
+    fi
+    rm -f "$TMP_ZIP"
+  fi
+
+  if [ "$EXTRACTED" != 1 ]; then
+    say "Extracting web static assets from mdmesh-web container image…"
+    WEB_IMAGE="ghcr.io/${IMAGE_OWNER:-local}/mdmesh-web:${WEB_VERSION:-latest}"
+    CID=$(docker create "$WEB_IMAGE" 2>/dev/null || true)
+    if [ -n "$CID" ]; then
+      docker cp "$CID:/srv/." "$WEB_DIR" 2>/dev/null || true
+      docker rm "$CID" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # Certbot check
+  if command -v certbot >/dev/null; then
+    say "Running certbot to configure SSL/TLS..."
+    certbot -d "$HOST" || warn "Certbot failed or was cancelled. Please configure HTTPS manually."
+  else
+    warn "certbot was not found. Please configure SSL/TLS certificates for ${HOST} in Nginx manually."
+  fi
+
+  # Generate Nginx configuration
+  NGINX_CONF_AVAILABLE="/etc/nginx/sites-available/mdmesh.conf"
+  NGINX_CONF_ENABLED="/etc/nginx/sites-enabled/mdmesh.conf"
+
+  TMP_NGINX_CONF=$(mktemp)
+  sed -e "s#__HOST__#${HOST}#g" \
+      -e "s#__WEB_ROOT__#${WEB_DIR}#g" \
+      -e "s#__SERVER_PORT__#${SERVER_PORT:-8080}#g" \
+      -e "s#__SUPERVISOR_PORT__#${SUPERVISOR_PORT:-9000}#g" \
+      docker/nginx.conf.template > "$TMP_NGINX_CONF"
+
+  if [ -w "/etc/nginx/sites-available" ] || [ "$EUID" -eq 0 ]; then
+    mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+    cp "$TMP_NGINX_CONF" "$NGINX_CONF_AVAILABLE"
+    ln -sf "$NGINX_CONF_AVAILABLE" "$NGINX_CONF_ENABLED"
+    rm -f "$TMP_NGINX_CONF"
+    if command -v nginx >/dev/null; then
+      nginx -t && (systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true)
+    fi
+  else
+    say "Root permissions required to write /etc/nginx/sites-available/mdmesh.conf."
+    say "Writing generated configuration to ./mdmesh.nginx.conf..."
+    cp "$TMP_NGINX_CONF" ./mdmesh.nginx.conf
+    rm -f "$TMP_NGINX_CONF"
+    warn "Please copy ./mdmesh.nginx.conf to /etc/nginx/sites-available/mdmesh.conf, link to sites-enabled, and reload Nginx."
+  fi
 fi
 
 echo
