@@ -25,8 +25,15 @@ internal class PrivateDnsPolicy(
     override fun setDnsHost(dnsHost: String?): PolicyOutcome {
         if (!isSupported()) return PolicyOutcome.Unsupported
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return PolicyOutcome.Unsupported
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return applyDnsHost(dnsHost)
+        }
 
+        return PolicyOutcome.Unsupported
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun applyDnsHost(dnsHost: String?): PolicyOutcome {
         val host = dnsHost?.trim()
         return runCatching {
             if (!host.isNullOrEmpty()) {
