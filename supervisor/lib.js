@@ -62,6 +62,19 @@ function apkAsset(release, manifest) {
   };
 }
 
+/** Resolve downloadable webZip asset if present in release/manifest. */
+function webZipAsset(release, manifest) {
+  const webZip = manifest && manifest.components && manifest.components.webZip;
+  if (!webZip || !webZip.file || !webZip.sha256) return null;
+  const asset = ((release && release.assets) || []).find((a) => a.name === webZip.file);
+  if (!asset || !asset.browser_download_url) return null;
+  return {
+    file: webZip.file,
+    sha256: webZip.sha256,
+    url: asset.browser_download_url,
+  };
+}
+
 // Apply is a linear state machine the console + recovery page poll. The happy path advances
 // authorizing → backup → pull → recreate → healthcheck → done. On any failure apply.sh jumps to
 // `rollback` (transient) and ends at `rolled_back` or, if rollback itself fails, `failed`.
@@ -90,5 +103,5 @@ function sha256Matches(buf, expectedSha) {
 module.exports = {
   parseSemver, semverGt, pickRelease, shapeStatus,
   imageTags, nextPhase, isTerminal, APPLY_PHASES, APPLY_TERMINAL,
-  apkAsset, sha256Matches,
+  apkAsset, webZipAsset, sha256Matches,
 };
