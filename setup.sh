@@ -328,6 +328,14 @@ if [ "${HOST_NGINX:-0}" = "1" ]; then
     fi
   fi
 
+  # Certbot check
+  if command -v certbot >/dev/null; then
+    say "Running certbot to configure SSL/TLS..."
+    certbot -d "$HOST" || warn "Certbot failed or was cancelled. Please configure HTTPS manually."
+  else
+    warn "certbot was not found. Please configure SSL/TLS certificates for ${HOST} in Nginx manually."
+  fi
+
   # Generate Nginx configuration
   NGINX_CONF_AVAILABLE="/etc/nginx/sites-available/mdmesh.conf"
   NGINX_CONF_ENABLED="/etc/nginx/sites-enabled/mdmesh.conf"
@@ -353,14 +361,6 @@ if [ "${HOST_NGINX:-0}" = "1" ]; then
     cp "$TMP_NGINX_CONF" ./mdmesh.nginx.conf
     rm -f "$TMP_NGINX_CONF"
     warn "Please copy ./mdmesh.nginx.conf to /etc/nginx/sites-available/mdmesh.conf, link to sites-enabled, and reload Nginx."
-  fi
-
-  # Certbot check
-  if command -v certbot >/dev/null; then
-    say "Running certbot to configure SSL/TLS..."
-    certbot --nginx -d "$HOST" || warn "Certbot failed or was cancelled. Please configure HTTPS manually."
-  else
-    warn "certbot was not found. Please configure SSL/TLS certificates for ${HOST} in Nginx manually."
   fi
 fi
 
