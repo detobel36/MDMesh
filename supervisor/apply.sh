@@ -122,6 +122,7 @@ if [ "$HOST_NGINX" = "1" ]; then
   # Extract/update static web assets for host Nginx
   WEB_DIR="$PROJECT_DIR/web_dist"
   mkdir -p "$WEB_DIR"
+  rm -rf "${WEB_DIR:?}"/*
   UPDATED_WEB=0
   if [ -n "$WEB_ZIP_URL" ]; then
     TMP_ZIP=$(mktemp)
