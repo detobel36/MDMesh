@@ -18,7 +18,7 @@ import { searchFdroid, type FDroidApp } from '../api/fdroid';
 import { DeployModal, type DeploySubject } from '../components/DeployModal';
 import { FetchFromDevicesModal } from '../components/FetchFromDevicesModal';
 
-type SourceId = 'library' | 'custom' | 'fdroid' | 'play';
+type SourceId = 'library' | 'pkg' | 'custom' | 'fdroid' | 'play';
 
 interface Source {
   id: SourceId;
@@ -29,6 +29,7 @@ interface Source {
 
 const SOURCES: Source[] = [
   { id: 'library', label: 'Library', enabled: true, tip: 'Apps already uploaded to this MDMesh server.' },
+  { id: 'pkg', label: 'Package Name', enabled: true, tip: 'Add pre-installed default system apps by Package Name to uninstall or manage.' },
   { id: 'custom', label: 'Custom APK', enabled: true, tip: 'Deploy any APK by file or URL — including APKMirror / APKPure downloads.' },
   { id: 'fdroid', label: 'F-Droid', enabled: true, tip: 'Search the F-Droid open-source catalogue and deploy straight from f-droid.org.' },
   { id: 'play', label: 'Play Store', enabled: false, tip: 'Download via a Google account (Aurora-style dispenser). Not built yet.' },
@@ -123,6 +124,7 @@ export function AppsPage() {
           }}
         />
       )}
+      {source === 'pkg' && <PackageNameSource />}
       {source === 'custom' && <CustomSource onDeploy={setDeploy} />}
       {source === 'fdroid' && <FDroidSource onDeploy={setDeploy} />}
 
@@ -376,6 +378,85 @@ function EditAppModal({
           <button className="btn btn-primary" onClick={() => void save()} disabled={busy || uploadingIcon}>
             {busy ? 'Saving…' : 'Save'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PackageNameSource() {
+  const toast = useToast();
+  const [pkg, setPkg] = useState('');
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [savedAppId, setSavedAppId] = useState<number | undefined>(undefined);
+
+  async function save() {
+    const trimmedPkg = pkg.trim();
+    if (!trimmedPkg) {
+      toast.push('err', 'Package name required', 'Enter a package name (e.g. com.android.chrome)');
+      return;
+    }
+    setBusy(true);
+    try {
+      const saved = await saveAndroidApplication({
+        name: name.trim() || trimmedPkg,
+        pkg: trimmedPkg,
+        version: '1.0',
+        versionCode: 1,
+        type: 'app',
+      });
+      setSavedAppId(saved.id);
+      toast.push('ok', 'Added to Library', `${name.trim() || trimmedPkg} is in your Library — now assignable to a configuration to uninstall or manage.`);
+      setPkg('');
+      setName('');
+    } catch (e) {
+      const existing = (await listApplications(trimmedPkg).catch(() => [])).find((a) => a.pkg === trimmedPkg);
+      if (existing?.id) {
+        setSavedAppId(existing.id);
+        toast.push('ok', 'Already in Library', 'This app is already in your Library — you can assign it to a configuration.');
+      } else {
+        toast.push('err', 'Could not add to Library', e instanceof Error ? e.message : 'The server rejected the save.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel" style={{ maxWidth: 640 }}>
+      <div className="panel-head">
+        <h2 className="panel-title">Add by Package Name</h2>
+      </div>
+      <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <p className="note" style={{ margin: 0 }}>
+          Many system or default applications are pre-installed on Android devices (e.g., <span className="mono">com.android.chrome</span>, <span className="mono">com.google.android.youtube</span>, <span className="mono">com.android.settings</span>).
+          Add them to your Library with just their Package Name, then select "Remove" in a Configuration to uninstall them from devices.
+        </p>
+        <label className="field">
+          <span className="label">Package name *</span>
+          <input
+            className="input mono"
+            value={pkg}
+            onChange={(e) => setPkg(e.target.value)}
+            placeholder="e.g. com.android.chrome"
+            autoFocus
+          />
+        </label>
+        <label className="field">
+          <span className="label">Display name</span>
+          <input
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Google Chrome (optional)"
+          />
+        </label>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button className="btn btn-primary" onClick={() => void save()} disabled={busy || !pkg.trim()}>
+            {busy ? 'Saving…' : 'Add to Library'}
+          </button>
+          {savedAppId && <span className="note" style={{ margin: 0 }}>App is in Library — assignable to a configuration.</span>}
         </div>
       </div>
     </div>
