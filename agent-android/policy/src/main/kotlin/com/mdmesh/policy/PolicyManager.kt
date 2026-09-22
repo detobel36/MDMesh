@@ -3,6 +3,7 @@ package com.mdmesh.policy
 import android.app.admin.DevicePolicyManager
 import android.app.admin.SystemUpdatePolicy
 import android.os.Build
+import com.mdmesh.policy.dns.DnsPolicyFactory
 import com.mdmesh.policy.wifi.DpmHandle
 
 /**
@@ -110,5 +111,14 @@ class PolicyManager(
             }
             PolicyOutcome.Applied
         }.getOrElse { PolicyOutcome.Failed(it.message ?: "applyRestriction($key) failed") }
+    }
+
+    /**
+     * Configure global Private DNS host/IP on the device.
+     * API 28+ (Pie).
+     */
+    fun setGlobalPrivateDns(dnsHost: String?): PolicyOutcome {
+        val strategy = DnsPolicyFactory.create(handle) ?: return PolicyOutcome.Unsupported
+        return strategy.setDnsHost(dnsHost)
     }
 }
