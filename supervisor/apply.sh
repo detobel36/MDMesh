@@ -64,7 +64,11 @@ rollback() {
   set_env SERVER_VERSION "$OLD_SERVER"
   set_env WEB_VERSION "$OLD_WEB"
   set_env CURRENT_VERSION "$OLD_SERVER"
-  dc up -d --no-deps server caddy || errln "rollback recreate failed"
+  if [ "$(get_env HOST_NGINX)" = "1" ]; then
+    dc up -d --no-deps server || errln "rollback recreate failed"
+  else
+    dc up -d --no-deps server caddy || errln "rollback recreate failed"
+  fi
   if [ -s "$BACKUP_SQL" ]; then
     if ! dc exec -T postgres psql -U "$DB_USER" "$DB_NAME" < "$BACKUP_SQL" >/dev/null 2>&1; then
       errln "db restore reported errors (see $BACKUP_SQL)"
@@ -118,6 +122,7 @@ if [ "$HOST_NGINX" = "1" ]; then
   # Extract/update static web assets for host Nginx
   WEB_DIR="$PROJECT_DIR/web_dist"
   mkdir -p "$WEB_DIR"
+  rm -rf "${WEB_DIR:?}"/*
   UPDATED_WEB=0
   if [ -n "$WEB_ZIP_URL" ]; then
     TMP_ZIP=$(mktemp)
@@ -130,7 +135,7 @@ if [ "$HOST_NGINX" = "1" ]; then
   if [ "$UPDATED_WEB" != 1 ]; then
     # Fallback to docker cp from web image
     WEB_IMG_NAME="ghcr.io/$(get_env IMAGE_OWNER)/mdmesh-web:${VERSION}"
-    dc pull caddy 2>/dev/null || true
+    docker pull "$WEB_IMG_NAME" 2>/dev/null || true
     CID=$(docker create "$WEB_IMG_NAME" 2>/dev/null || true)
     if [ -n "$CID" ]; then
       docker cp "$CID:/srv/." "$WEB_DIR" 2>/dev/null || true
