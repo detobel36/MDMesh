@@ -53,7 +53,12 @@ else
   errln "version snapshot $ENV_SNAP missing — recreating current images"
 fi
 
-dc up -d --no-deps server caddy || errln "recreate failed"
+HOST_NGINX="$(grep -E '^HOST_NGINX=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
+if [ "$HOST_NGINX" = "1" ]; then
+  dc up -d --no-deps server || errln "recreate failed"
+else
+  dc up -d --no-deps server caddy || errln "recreate failed"
+fi
 
 # Restore the database dump (plain SQL with --clean; self-resets to the old schema).
 if [ -s "$SQL_SNAP" ]; then
