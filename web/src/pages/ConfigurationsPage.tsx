@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppShell } from '../ui/AppShell';
 import { useToast } from '../ui/toast';
 import {
@@ -7,6 +7,7 @@ import {
   saveConfiguration,
   deleteConfiguration,
   copyConfiguration,
+  uploadBackgroundImage,
   type Configuration,
   type ConfigApp,
 } from '../api/configurations';
@@ -487,7 +488,7 @@ function ConfigEditor({
         <section className="panel cfg-panel" key={group}>
           <div className="cfg-sec-h">{group}</div>
           {fields.map((f) => (
-            <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} onChange={(v) => set(f.key, v)} />
+            <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
           ))}
         </section>
       ))}
@@ -538,7 +539,7 @@ function ConfigEditor({
           <section className="panel cfg-panel" key={group}>
             <div className="cfg-sec-h">{group}</div>
             {fields.map((f) => (
-              <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} onChange={(v) => set(f.key, v)} />
+              <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
             ))}
           </section>
         ))}
@@ -562,6 +563,7 @@ function Field({
   apps,
   assigned,
   disabled,
+  configName,
   onChange,
 }: {
   def: FieldDef;
@@ -569,6 +571,7 @@ function Field({
   apps: Application[];
   assigned: ConfigApp[];
   disabled?: boolean;
+  configName?: string;
   onChange: (v: unknown) => void;
 }) {
   return (
@@ -579,13 +582,99 @@ function Field({
         <span className="cfg-field-help">{def.help}</span>
       </div>
       <div className="cfg-field-ctl">
-        <FieldControl def={def} value={value} apps={apps} assigned={assigned} disabled={disabled} onChange={onChange} />
+        <FieldControl def={def} value={value} apps={apps} assigned={assigned} disabled={disabled} configName={configName} onChange={onChange} />
       </div>
     </div>
   );
 }
 
-function FieldControl({ def, value, apps, assigned, disabled, onChange }: { def: FieldDef; value: unknown; apps: Application[]; assigned: ConfigApp[]; disabled?: boolean; onChange: (v: unknown) => void }) {
+function BackgroundImageControl({
+  value,
+  disabled,
+  configName,
+  onChange,
+}: {
+  value: unknown;
+  disabled?: boolean;
+  configName?: string;
+  onChange: (v: unknown) => void;
+}) {
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function onFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!configName || !configName.trim()) {
+      toast.push('err', 'Name required', 'Please enter a configuration name before uploading a background.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const res = await uploadBackgroundImage(file, configName.trim());
+      onChange(res.url);
+      toast.push('ok', 'Background uploaded', 'Background image uploaded successfully.');
+    } catch (err) {
+      toast.push('err', 'Upload failed', err instanceof Error ? err.message : '');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
+      <input
+        className="input"
+        type="text"
+        value={value == null ? '' : String(value)}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="https://..."
+        style={{ flex: 1 }}
+      />
+      {!disabled && (
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={(e) => void onFileSelected(e)}
+          />
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+          >
+            {uploading ? 'Uploading…' : 'Upload picture'}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FieldControl({
+  def,
+  value,
+  apps,
+ assigned, disabled,
+  configName,
+  onChange,
+}: {
+  def: FieldDef;
+  value: unknown;
+  apps: Application[];
+ assigned: ConfigApp[]; disabled?: boolean;
+  configName?: string;
+  onChange: (v: unknown) => void;
+}) {
+  if (def.key === 'backgroundImageUrl') {
+    return <BackgroundImageControl value={value} disabled={disabled} configName={configName} onChange={onChange} />;
+  }
   switch (def.type) {
     case 'switch':
       return (

@@ -99,3 +99,18 @@ export async function copyConfiguration(
 ): Promise<void> {
   await apiClient.put('/private/configurations/copy', { id, name, description });
 }
+
+export interface BackgroundUploadResult {
+  url: string;
+}
+
+/** Upload a background image for a configuration and return its public URL. */
+export async function uploadBackgroundImage(
+  file: File,
+  configurationName: string,
+): Promise<BackgroundUploadResult> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('configurationName', configurationName);
+  return apiClient.postForm<BackgroundUploadResult>('/private/configurations/background', form);
+}
