@@ -66,6 +66,7 @@ public class ConfigurationResource {
     private com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller;
     private UploadedFileDAO uploadedFileDAO;
     private String filesDirectory;
+    private com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller;
     private String baseUrl;
 
     /**
@@ -83,6 +84,7 @@ public class ConfigurationResource {
                                  com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller,
                                  UploadedFileDAO uploadedFileDAO,
                                  @Named("files.directory") String filesDirectory,
+                                 com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller,
                                  @Named("base.url") String baseUrl) {
         this.configurationDAO = configurationDAO;
         this.applicationDAO = applicationDAO;
@@ -92,6 +94,7 @@ public class ConfigurationResource {
         this.configAppInstaller = configAppInstaller;
         this.uploadedFileDAO = uploadedFileDAO;
         this.filesDirectory = filesDirectory;
+        this.configAppInstaller = configAppInstaller;
         this.baseUrl = baseUrl;
     }
     // =================================================================================================================
@@ -307,6 +310,9 @@ public class ConfigurationResource {
                     log.info("Configuration " + configuration.getName() + " updated by user "  + SecurityContext.get().getCurrentUserName());
                     this.configurationDAO.updateConfiguration(configuration);
                     this.pushService.notifyDevicesOnUpdate(configuration.getId());
+                    if (this.configAppInstaller != null) {
+                        this.configAppInstaller.enqueueConfigAppsForConfiguration(configuration.getId());
+                    }
                 }
                 configuration = getConfiguration(configuration.getId());
 
@@ -337,6 +343,9 @@ public class ConfigurationResource {
         }
         try {
             this.configurationDAO.upgradeConfigurationApplication(request.getConfigurationId(), request.getApplicationId());
+            if (this.configAppInstaller != null) {
+                this.configAppInstaller.enqueueConfigAppsForConfiguration(request.getConfigurationId());
+            }
             final Configuration configuration = this.getConfiguration(request.getConfigurationId());
             return Response.OK(configuration);
         } catch (Exception e) {
