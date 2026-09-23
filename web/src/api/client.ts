@@ -29,6 +29,35 @@ export class ApiError extends Error {
   }
 }
 
+export function clearSessionCookie(): void {
+  if (typeof document !== 'undefined') {
+    document.cookie = 'JSESSIONID=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/;';
+    document.cookie = 'JSESSIONID=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/rest;';
+    document.cookie = 'JSESSIONID=; expires=Thu, 01 Jan 1970 00:00:00 GMT;';
+  }
+}
+
+type UnauthorizedListener = () => void;
+const unauthorizedListeners = new Set<UnauthorizedListener>();
+
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener);
+  return () => {
+    unauthorizedListeners.delete(listener);
+  };
+}
+
+function handleUnauthorized(): void {
+  clearSessionCookie();
+  for (const listener of unauthorizedListeners) {
+    try {
+      listener();
+    } catch {
+      /* ignore listener errors */
+    }
+  }
+}
+
 interface RequestOptions {
   method?: string;
   body?: unknown;
@@ -84,6 +113,9 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   }
 
   if (res.status === 401 || res.status === 403) {
+    if (!path.startsWith('/public/auth/login')) {
+      handleUnauthorized();
+    }
     throw new ApiError('Not authenticated', 'ERROR', res.status);
   }
 

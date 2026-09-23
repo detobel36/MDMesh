@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -11,6 +12,7 @@ import {
   logout as apiLogout,
   type AuthUser,
 } from '../api/auth';
+import { clearSessionCookie, onUnauthorized } from '../api/client';
 
 // Auth is session based on the server, but the SPA still needs to remember
 // "am I logged in" across reloads. The session cookie is HttpOnly and not
@@ -52,6 +54,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return u;
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = onUnauthorized(() => {
+      setUser(null);
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        /* non-fatal */
+      }
+      clearSessionCookie();
+    });
+    return unsubscribe;
+  }, []);
+
   const signOut = useCallback(async () => {
     await apiLogout();
     setUser(null);
@@ -60,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* non-fatal */
     }
+    clearSessionCookie();
   }, []);
 
   const value = useMemo<AuthContextValue>(
