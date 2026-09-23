@@ -43,11 +43,9 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var dpmHandle: DpmHandle
     @Inject lateinit var serverConfig: ServerConfigStore
     @Inject lateinit var syncStatus: SyncStatus
-    @Inject lateinit var eventLog: com.mdmesh.core.telemetry.EventLog
 
     private lateinit var deviceIdValue: TextView
     private lateinit var kioskValue: TextView
-    private lateinit var debugLogsValue: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,20 +90,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val id = deviceIdStore.current()
             deviceIdValue.text = if (id.isNullOrBlank()) enrollingLabel() else id
-            updateDebugLogs()
         }
-    }
-
-    private fun updateDebugLogs() {
-        val lastErr = syncStatus.lastError.value
-        val errStr = if (lastErr != null) {
-            val at = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(lastErr.atMillis))
-            "Last Error: ${lastErr.message} ($at)"
-        } else {
-            "Sync: OK"
-        }
-        val info = "$errStr\nDevice Owner: ${isDeviceOwner()}\nAgent Version: ${com.mdmesh.agent.BuildConfig.VERSION_NAME}"
-        debugLogsValue.text = info
     }
 
     /** "Enrolling…" plus the last sync error (if any), so a stuck enrollment is diagnosable on-device. */
@@ -166,11 +151,6 @@ class MainActivity : ComponentActivity() {
 
         root.addView(label("SERVER"))
         root.addView(text(serverConfig.baseUrl(), 13f, MUTED, mono = true))
-        root.addView(spacer())
-
-        root.addView(label("DEBUG LOGS"))
-        debugLogsValue = text("…", 13f, SIGNAL, mono = true)
-        root.addView(debugLogsValue)
         root.addView(spacer())
 
         root.addView(
