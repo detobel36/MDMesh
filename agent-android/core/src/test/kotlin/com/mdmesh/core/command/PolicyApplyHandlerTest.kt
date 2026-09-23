@@ -65,4 +65,31 @@ class PolicyApplyHandlerTest {
         val result = PolicyApplyHandler(mapOf("wifi" to wifi)).handle(command(payload("wifi", true)))
         assertEquals(CommandStatus.FAILED, result.status)
     }
+
+    private class FakeDnsPolicy(
+        private val outcome: PolicyOutcome,
+    ) : com.mdmesh.policy.dns.DnsPolicy {
+        override val capabilityKey: String = "dns"
+        var lastHost: String? = "unsets"
+        override fun isSupported(): Boolean = true
+        override fun setDnsHost(dnsHost: String?): PolicyOutcome {
+            lastHost = dnsHost
+            return outcome
+        }
+    }
+
+    @Test
+    fun `applies dns policy with string host value`() = runTest {
+        val dns = FakeDnsPolicy(PolicyOutcome.Applied)
+        val handler = PolicyApplyHandler(emptyMap(), dnsPolicy = dns)
+
+        val dnsPayload = buildJsonObject {
+            put("policy", "dns")
+            put("value", "1.1.1.1")
+        }
+        val result = handler.handle(command(dnsPayload))
+
+        assertEquals(CommandStatus.DONE, result.status)
+        assertEquals("1.1.1.1", dns.lastHost)
+    }
 }

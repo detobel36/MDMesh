@@ -188,8 +188,12 @@ object AgentModule {
     @Provides
     @IntoSet
     fun providePolicyApplyHandler(
+        handle: DpmHandle,
         toggles: Map<String, @JvmSuppressWildcards TogglePolicy>,
-    ): CommandHandler = PolicyApplyHandler(toggles)
+    ): CommandHandler = PolicyApplyHandler(
+        toggles = toggles,
+        dnsPolicy = com.mdmesh.policy.dns.DnsPolicyFactory.create(handle),
+    )
 
     @Provides
     @Singleton
