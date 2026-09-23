@@ -183,6 +183,9 @@ public interface DeviceMapper {
     @Select("SELECT devices.id FROM devices WHERE configurationId = #{configurationId}")
     List<Device> getDeviceIdsBySoleConfigurationId(@Param("configurationId") int configurationId);
 
+    @Select("SELECT * FROM devices WHERE configurationId = #{configurationId}")
+    List<Device> getDevicesByConfigurationId(@Param("configurationId") int configurationId);
+
     void insertDeviceApplicationSettings(@Param("id") Integer deviceId,
                                          @Param("appSettings") List<ApplicationSetting> applicationSettings);
 

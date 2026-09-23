@@ -12,6 +12,7 @@ package com.hmdm.rest.resource.support;
 
 import com.hmdm.notification.AgentWakeHub;
 import com.hmdm.rest.json.InstallPayloadBuilder;
+import com.hmdm.rest.json.UninstallPayloadBuilder;
 import com.hmdm.persistence.AgentCommandDAO;
 import com.hmdm.persistence.UnsecureDAO;
 import com.hmdm.persistence.domain.AgentCommand;
@@ -37,6 +38,8 @@ public class ConfigAppInstaller {
 
     /** Action value in configurationApplications meaning "install this app". */
     private static final int ACTION_INSTALL = 1;
+    /** Action value in configurationApplications meaning "remove/uninstall this app if installed". */
+    private static final int ACTION_REMOVE = 2;
 
     private final UnsecureDAO unsecureDAO;
     private final AgentCommandDAO commandDAO;
@@ -50,9 +53,8 @@ public class ConfigAppInstaller {
     }
 
     /**
-     * Queue an {@code app.install} for every action=install app of the device's configuration
-     * that has a real hosted APK URL. Returns the number queued. Never throws — callers treat
-     * this as best-effort (enrollment must not fail because an app list is dirty).
+     * Queue {@code app.install} for action=install apps and {@code app.uninstall} for action=remove apps.
+     * Returns the total number queued. Never throws — callers treat this as best-effort.
      */
     public int enqueueConfigApps(Device device) {
         if (device == null || device.getConfigurationId() == null) {
@@ -64,24 +66,39 @@ public class ConfigAppInstaller {
                     device.getCustomerId(), device.getConfigurationId());
             long now = System.currentTimeMillis();
             for (Application app : apps) {
-                if (app == null || app.getAction() != ACTION_INSTALL) {
+                if (app == null) {
                     continue;
                 }
-                String url = firstUsableUrl(app);
-                boolean hasParts = app.getParts() != null && !app.getParts().trim().isEmpty();
-                if ((url == null && !hasParts) || app.getPkg() == null || app.getPkg().trim().isEmpty()) {
-                    // Catalog placeholder / web app / seed leftover — nothing downloadable.
-                    continue;
+                if (app.getAction() == ACTION_INSTALL) {
+                    String url = firstUsableUrl(app);
+                    boolean hasParts = app.getParts() != null && !app.getParts().trim().isEmpty();
+                    if ((url == null && !hasParts) || app.getPkg() == null || app.getPkg().trim().isEmpty()) {
+                        // Catalog placeholder / web app / seed leftover — nothing downloadable.
+                        continue;
+                    }
+                    AgentCommand cmd = new AgentCommand();
+                    cmd.setDeviceNumber(device.getNumber());
+                    cmd.setType("app.install");
+                    cmd.setPayload(InstallPayloadBuilder.build(app.getPkg().trim(), app.getVersionCode(), url, app.getParts()));
+                    cmd.setRequiresCapability(RolloutProgress.INSTALL_CAPABILITY);
+                    cmd.setStatus("pending");
+                    cmd.setCreatedAt(now);
+                    commandDAO.insert(cmd);
+                    queued++;
+                } else if (app.getAction() == ACTION_REMOVE) {
+                    if (app.getPkg() == null || app.getPkg().trim().isEmpty()) {
+                        continue;
+                    }
+                    AgentCommand cmd = new AgentCommand();
+                    cmd.setDeviceNumber(device.getNumber());
+                    cmd.setType("app.uninstall");
+                    cmd.setPayload(UninstallPayloadBuilder.build(app.getPkg().trim()));
+                    cmd.setRequiresCapability(RolloutProgress.INSTALL_CAPABILITY);
+                    cmd.setStatus("pending");
+                    cmd.setCreatedAt(now);
+                    commandDAO.insert(cmd);
+                    queued++;
                 }
-                AgentCommand cmd = new AgentCommand();
-                cmd.setDeviceNumber(device.getNumber());
-                cmd.setType("app.install");
-                cmd.setPayload(InstallPayloadBuilder.build(app.getPkg().trim(), app.getVersionCode(), url, app.getParts()));
-                cmd.setRequiresCapability(RolloutProgress.INSTALL_CAPABILITY);
-                cmd.setStatus("pending");
-                cmd.setCreatedAt(now);
-                commandDAO.insert(cmd);
-                queued++;
             }
             if (queued > 0) {
                 wakeHub.wake(device.getNumber(), "commands");
@@ -90,6 +107,22 @@ public class ConfigAppInstaller {
             logger.warn("Failed to queue configuration apps for device {}", device.getNumber(), e);
         }
         return queued;
+    }
+
+    /**
+     * Queue {@code app.install} / {@code app.uninstall} commands for all devices attached to [configurationId].
+     */
+    public int enqueueConfigAppsForConfiguration(int configurationId) {
+        int totalQueued = 0;
+        try {
+            List<Device> devices = unsecureDAO.getDevicesByConfigurationId(configurationId);
+            for (Device device : devices) {
+                totalQueued += enqueueConfigApps(device);
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to queue config apps for configuration {}", configurationId, e);
+        }
+        return totalQueued;
     }
 
     /**

@@ -68,6 +68,7 @@ public class ApplicationResource {
     private ApplicationDAO applicationDAO;
     private ConfigurationDAO configurationDAO;
     private PushService pushService;
+    private com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller;
 
     /**
      * <p>A constructor required by Swagger.</p>
@@ -79,10 +80,12 @@ public class ApplicationResource {
     public ApplicationResource(ApplicationDAO applicationDAO,
                                ConfigurationDAO configurationDAO,
                                PushService pushService,
+                               com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller,
                                @Named("files.directory") String filesDirectory) {
         this.applicationDAO = applicationDAO;
         this.configurationDAO = configurationDAO;
         this.pushService = pushService;
+        this.configAppInstaller = configAppInstaller;
         this.baseDirectory = new File(filesDirectory);
 
         if (!this.baseDirectory.exists()) {
@@ -516,6 +519,9 @@ public class ApplicationResource {
             for (ApplicationConfigurationLink configurationLink : request.getConfigurations()) {
                 if (configurationLink.isNotify()) {
                     this.pushService.notifyDevicesOnUpdate(configurationLink.getConfigurationId());
+                    if (this.configAppInstaller != null) {
+                        this.configAppInstaller.enqueueConfigAppsForConfiguration(configurationLink.getConfigurationId());
+                    }
                 }
             }
 
@@ -554,6 +560,9 @@ public class ApplicationResource {
             for (ApplicationVersionConfigurationLink configurationLink : request.getConfigurations()) {
                 if (configurationLink.isNotify()) {
                     this.pushService.notifyDevicesOnUpdate(configurationLink.getConfigurationId());
+                    if (this.configAppInstaller != null) {
+                        this.configAppInstaller.enqueueConfigAppsForConfiguration(configurationLink.getConfigurationId());
+                    }
                 }
             }
 
