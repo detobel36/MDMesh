@@ -1926,6 +1926,12 @@ a {
   align-items: center;
   gap: 8px;
   margin-bottom: 16px;
+  position: sticky;
+  top: 0;
+  padding: 10px;
+  margin: -10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
 }
 .cfg-panel {
   padding: 16px 20px;
