@@ -375,6 +375,10 @@ public class UnsecureDAO {
         return this.deviceMapper.getAllConfigurationDevices(configurationId, customerId);
     }
 
+    public List<Device> getDevicesByConfigurationId(int configurationId) {
+        return this.deviceMapper.getDevicesByConfigurationId(configurationId);
+    }
+
     public List<Device> getAllCustomerDevices(int customerId) {
         return this.deviceMapper.getAllCustomerDevices(customerId);
     }
