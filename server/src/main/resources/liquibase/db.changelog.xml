@@ -2837,4 +2837,14 @@
         <rollback>ALTER TABLE applicationVersions DROP COLUMN parts;</rollback>
     </changeSet>
 
+    <changeSet id="22.08.01-configurations-dns" author="hmdm" context="common">
+        <comment>Adding dns column to configurations table for automatic DNS IP/hostname configuration on Android devices.</comment>
+        <sql>
+            ALTER TABLE configurations ADD COLUMN dns VARCHAR(255);
+        </sql>
+        <rollback>
+            ALTER TABLE configurations DROP COLUMN dns;
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>
