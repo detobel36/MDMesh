@@ -67,7 +67,20 @@ export function ConfigurationsPage() {
 
   const load = () =>
     getConfigurations()
-      .then(setConfigs)
+      .then(async (list) => {
+        const enriched = await Promise.all(
+          list.map(async (c) => {
+            if (c.id == null) return c;
+            try {
+              const apps = await getConfigurationApps(c.id);
+              return { ...c, applications: apps };
+            } catch {
+              return c;
+            }
+          })
+        );
+        setConfigs(enriched);
+      })
       .catch(() => {
         setConfigs([]);
         setError('Could not load configurations.');
