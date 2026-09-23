@@ -43,10 +43,13 @@ public interface ApplicationMapper {
                     "applicationVersions.version, applicationVersions.versionCode, applicationVersions.url," +
                     "applicationVersions.split, applicationVersions.urlArmeabi, applicationVersions.urlArm64," +
                     "applications.latestVersion AS usedVersionId, " +
-                    "(usageData.usageCount > 0) AS deletionProhibited " +
+                    "(usageData.usageCount > 0) AS deletionProhibited, " +
+                    "uploadedFiles.filepath AS icon " +
             "FROM applications " +
             "INNER JOIN customers ON customers.id = applications.customerId " +
             "INNER JOIN applicationVersions ON applicationVersions.id = applications.latestVersion " +
+            "LEFT JOIN icons ON icons.id = applications.iconId " +
+            "LEFT JOIN uploadedFiles ON uploadedFiles.id = icons.fileId " +
             "LEFT JOIN (SELECT applicationVersions.applicationId AS id, COUNT(*) AS usageCount " +
             "            FROM applicationVersions " +
             "            INNER JOIN configurationApplications c ON applicationVersions.id = c.applicationVersionId" +
@@ -57,10 +60,13 @@ public interface ApplicationMapper {
                     "applicationVersions.version, applicationVersions.versionCode, applicationVersions.url, " +
                     "applicationVersions.split, applicationVersions.urlArmeabi, applicationVersions.urlArm64," +
                     "applications.latestVersion AS usedVersionId, " +
-                    "(usageData.usageCount > 0) AS deletionProhibited " +
+                    "(usageData.usageCount > 0) AS deletionProhibited, " +
+                    "uploadedFiles.filepath AS icon " +
                     "FROM applicationVersions " +
                     "INNER JOIN applications ON applicationVersions.id = applications.latestVersion " +
                     "INNER JOIN customers ON customers.id = applications.customerId " +
+                    "LEFT JOIN icons ON icons.id = applications.iconId " +
+                    "LEFT JOIN uploadedFiles ON uploadedFiles.id = icons.fileId " +
                     "LEFT JOIN (SELECT applicationVersions.applicationId AS id, COUNT(*) AS usageCount " +
                     "           FROM applicationVersions " +
                     "           INNER JOIN configurationApplications c ON applicationVersions.id = c.applicationVersionId" +
