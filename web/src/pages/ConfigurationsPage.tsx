@@ -416,7 +416,11 @@ function ConfigEditor({
   async function doSave() {
     setBusy(true);
     try {
-      await saveConfiguration(draft);
+      const saveDraft = { ...draft };
+      if (saveDraft.backgroundImageUrl && String(saveDraft.backgroundImageUrl).trim().length > 0) {
+        saveDraft.useDefaultDesignSettings = false;
+      }
+      await saveConfiguration(saveDraft);
       toast.push('ok', isNew ? 'Configuration created' : 'Configuration saved', String(draft.name));
       onSaved();
     } catch (e) {
