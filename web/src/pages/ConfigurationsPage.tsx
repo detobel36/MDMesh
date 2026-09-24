@@ -501,14 +501,29 @@ function ConfigEditor({
         </div>
       )}
 
-      {enforcedByGroup.map(({ group, fields }) => (
-        <section className="panel cfg-panel" key={group}>
-          <div className="cfg-sec-h">{group}</div>
-          {fields.map((f) => (
-            <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
-          ))}
-        </section>
-      ))}
+      {enforcedByGroup.map(({ group, fields }) => {
+        if (group === 'Display') {
+          const designKeys = new Set(['useDefaultDesignSettings', 'backgroundColor', 'textColor', 'backgroundImageUrl']);
+          const primaryDisplayFields = fields.filter((f) => !designKeys.has(f.key));
+          return (
+            <section className="panel cfg-panel" key={group}>
+              <div className="cfg-sec-h">{group}</div>
+              <LauncherDesignControl draft={draft} readOnly={readOnly} setDraft={setDraft} />
+              {primaryDisplayFields.map((f) => (
+                <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
+              ))}
+            </section>
+          );
+        }
+        return (
+          <section className="panel cfg-panel" key={group}>
+            <div className="cfg-sec-h">{group}</div>
+            {fields.map((f) => (
+              <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
+            ))}
+          </section>
+        );
+      })}
 
       <section className="panel cfg-panel">
         <div className="cfg-sec-h" style={{ display: 'flex', alignItems: 'center' }}>
@@ -555,15 +570,12 @@ function ConfigEditor({
         legacyByGroup.map(({ group, fields }) => {
           if (group === 'Display') {
             const designKeys = new Set(['useDefaultDesignSettings', 'backgroundColor', 'textColor', 'backgroundImageUrl']);
-            const otherFields = fields.filter((f) => !designKeys.has(f.key));
+            const legacyDisplayFields = fields.filter((f) => !designKeys.has(f.key));
+            if (legacyDisplayFields.length === 0) return null;
             return (
               <section className="panel cfg-panel" key={group}>
                 <div className="cfg-sec-h">{group}</div>
-                {otherFields.filter((f) => ['autoBrightness', 'brightness', 'manageTimeout', 'timeout', 'manageVolume', 'volume', 'orientation'].includes(f.key)).map((f) => (
-                  <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
-                ))}
-                <LauncherDesignControl draft={draft} readOnly={readOnly} setDraft={setDraft} />
-                {otherFields.filter((f) => !['autoBrightness', 'brightness', 'manageTimeout', 'timeout', 'manageVolume', 'volume', 'orientation'].includes(f.key)).map((f) => (
+                {legacyDisplayFields.map((f) => (
                   <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
                 ))}
               </section>

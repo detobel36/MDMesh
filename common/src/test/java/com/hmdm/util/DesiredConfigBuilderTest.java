@@ -44,6 +44,14 @@ public class DesiredConfigBuilderTest {
     }
 
     @Test
+    public void kiosk_theme_includes_background_image_url_when_set() {
+        Configuration c = kioskConfig();
+        c.setBackgroundImageUrl("https://example.com/bg.png");
+        DesiredConfig d = DesiredConfigBuilder.build(c, Collections.emptyList());
+        assertEquals("https://example.com/bg.png", d.getKiosk().getTheme().getBackgroundImageUrl());
+    }
+
+    @Test
     public void kiosk_single_when_main_app_is_the_only_install_app() {
         DesiredConfig d = DesiredConfigBuilder.build(kioskConfig(), Arrays.asList(app(5, 505, "com.acme.pos", 1), app(9, 909, "com.acme.old", 2)));
         assertEquals("single", d.getKiosk().getMode());
