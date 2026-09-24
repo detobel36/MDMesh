@@ -87,12 +87,31 @@ public class ApplicationDAO extends AbstractLinkedDAO<Application, ApplicationCo
         this.apkFileAnalyzer = apkFileAnalyzer;
     }
 
+    private void populateIconUrl(Application app) {
+        if (app != null && app.getIcon() != null && !app.getIcon().trim().isEmpty()) {
+            if (!app.getIcon().startsWith("http://") && !app.getIcon().startsWith("https://") && !app.getIcon().startsWith("/")) {
+                Customer customer = customerDAO.findById(app.getCustomerId());
+                if (customer != null) {
+                    app.setIcon(FileUtil.createFileUrl(this.baseUrl, customer.getFilesDir(), app.getIcon()));
+                }
+            }
+        }
+    }
+
     public List<Application> getAllApplications() {
-        return getList(this.mapper::getAllApplications);
+        List<Application> list = getList(this.mapper::getAllApplications);
+        if (list != null) {
+            list.forEach(this::populateIconUrl);
+        }
+        return list;
     }
 
     public List<Application> getAllApplicationsByValue(String value) {
-        return getList(customerId -> this.mapper.getAllApplicationsByValue(customerId, "%" + value + "%"));
+        List<Application> list = getList(customerId -> this.mapper.getAllApplicationsByValue(customerId, "%" + value + "%"));
+        if (list != null) {
+            list.forEach(this::populateIconUrl);
+        }
+        return list;
     }
 
     public List<Application> getAllApplicationsByUrl(String url) {
@@ -102,8 +121,11 @@ public class ApplicationDAO extends AbstractLinkedDAO<Application, ApplicationCo
             int i = url.lastIndexOf('/');
             if (i != -1) {
                 String url1 = url.substring(0, i) + '/' + url.substring(i);
-                return getList(customerId -> this.mapper.getAllApplicationsByUrl(customerId, url1));
+                appList = getList(customerId -> this.mapper.getAllApplicationsByUrl(customerId, url1));
             }
+        }
+        if (appList != null) {
+            appList.forEach(this::populateIconUrl);
         }
         return appList;
     }
@@ -576,23 +598,33 @@ public class ApplicationDAO extends AbstractLinkedDAO<Application, ApplicationCo
     }
 
     public List<Application> findByPackageIdAndVersion(String pkg, String version) {
-        return getList(customerId -> this.mapper.findByPackageIdAndVersion(customerId, pkg, version));
+        List<Application> list = getList(customerId -> this.mapper.findByPackageIdAndVersion(customerId, pkg, version));
+        if (list != null) list.forEach(this::populateIconUrl);
+        return list;
     }
 
     public List<Application> findByPackageIdAndNewerVersion(String pkg, String version) {
-        return getList(customerId -> this.mapper.findByPackageIdAndNewerVersion(customerId, pkg, version));
+        List<Application> list = getList(customerId -> this.mapper.findByPackageIdAndNewerVersion(customerId, pkg, version));
+        if (list != null) list.forEach(this::populateIconUrl);
+        return list;
     }
 
     public List<Application> findByPackageId(String pkg) {
-        return getList(customerId -> this.mapper.findByPackageId(customerId, pkg));
+        List<Application> list = getList(customerId -> this.mapper.findByPackageId(customerId, pkg));
+        if (list != null) list.forEach(this::populateIconUrl);
+        return list;
     }
 
     public List<Application> findByName(String name) {
-        return getList(customerId -> this.mapper.findByName(customerId, name));
+        List<Application> list = getList(customerId -> this.mapper.findByName(customerId, name));
+        if (list != null) list.forEach(this::populateIconUrl);
+        return list;
     }
 
     public Application findById(int id) {
-        return this.mapper.findById(id);
+        Application app = this.mapper.findById(id);
+        populateIconUrl(app);
+        return app;
     }
 
     public ApplicationVersion findApplicationVersionById(int id) {
@@ -615,7 +647,9 @@ public class ApplicationDAO extends AbstractLinkedDAO<Application, ApplicationCo
 
     public List<Application> getAllAdminApplications() {
         if (SecurityContext.get().isSuperAdmin()) {
-            return this.mapper.getAllAdminApplications();
+            List<Application> list = this.mapper.getAllAdminApplications();
+            if (list != null) list.forEach(this::populateIconUrl);
+            return list;
         } else {
             throw SecurityException.onAdminDataAccessViolation("get all applications");
         }
@@ -623,7 +657,9 @@ public class ApplicationDAO extends AbstractLinkedDAO<Application, ApplicationCo
 
     public List<Application> getAllAdminApplicationsByValue(String value) {
         if (SecurityContext.get().isSuperAdmin()) {
-            return getList(customerId -> this.mapper.getAllAdminApplicationsByValue("%" + value + "%"));
+            List<Application> list = getList(customerId -> this.mapper.getAllAdminApplicationsByValue("%" + value + "%"));
+            if (list != null) list.forEach(this::populateIconUrl);
+            return list;
         } else {
             throw SecurityException.onAdminDataAccessViolation("get all applications");
         }
