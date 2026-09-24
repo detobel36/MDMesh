@@ -82,7 +82,7 @@ export const CONFIG_FIELDS: FieldDef[] = [
     { value: 'NONE', label: 'Open' }, { value: 'WPA', label: 'WPA/WPA2' }, { value: 'WEP', label: 'WEP' }, { value: 'EAP', label: 'Enterprise (EAP)' },
   ] },
   { key: 'mobileEnrollment', label: 'Enroll over mobile data', type: 'switch', group: 'Network', help: 'Prefer mobile data over Wi-Fi during provisioning.' },
-  { key: 'dns', label: 'DNS server', type: 'text', group: 'Network', focused: true, help: 'Private DNS hostname (e.g. dns.adguard-dns.com, dns.google, one.one.one.one).' },
+  { key: 'dns', label: 'DNS server', type: 'text', group: 'Network', focused: true, enforced: true, help: 'Private DNS hostname (e.g. dns.adguard-dns.com, dns.google, one.one.one.one).' },
 
   // ── Security ───────────────────────────────────────────────────────────-─
   { key: 'password', label: 'Admin password', type: 'password', group: 'Security', enforced: true, help: 'Kiosk exit password (stored as entered).' },
