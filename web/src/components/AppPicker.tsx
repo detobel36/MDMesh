@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
-import { appCategory, saveAndroidApplication, listApplications, type AppCategory, type Application } from '../api/applications';
-import { useToast } from '../ui/toast';
+import { appCategory, type AppCategory, type Application } from '../api/applications';
 
 const CAT_LABEL: Record<AppCategory, string> = {
   uploaded: 'Uploaded',
@@ -21,18 +20,12 @@ export function AppPicker({
   onAdd: (apps: Application[]) => void;
   onClose: () => void;
 }) {
-  const toast = useToast();
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<Set<number>>(new Set());
-  const [extraApps, setExtraApps] = useState<Application[]>([]);
-  const [customPkg, setCustomPkg] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const allApps = useMemo(() => [...apps, ...extraApps], [apps, extraApps]);
 
   const available = useMemo(
-    () => allApps.filter((a) => !excludeIds.has(a.id)),
-    [allApps, excludeIds],
+    () => apps.filter((a) => !excludeIds.has(a.id)),
+    [apps, excludeIds],
   );
 
   const counts = useMemo(() => {
@@ -64,50 +57,9 @@ export function AppPicker({
   }
 
   function add() {
-    const chosen = allApps.filter((a) => picked.has(a.id));
+    const chosen = apps.filter((a) => picked.has(a.id));
     if (chosen.length) onAdd(chosen);
     onClose();
-  }
-
-  async function handleQuickAddPkg() {
-    const trimmed = customPkg.trim();
-    if (!trimmed) return;
-
-    // Check if already in available apps list
-    const existing = allApps.find((a) => a.pkg.toLowerCase() === trimmed.toLowerCase());
-    if (existing) {
-      toggle(existing.id);
-      setCustomPkg('');
-      toast.push('ok', 'App selected', `Selected ${existing.name} (${existing.pkg})`);
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const saved = await saveAndroidApplication({
-        name: trimmed,
-        pkg: trimmed,
-        version: '1.0',
-        versionCode: 1,
-        type: 'app',
-      });
-      setExtraApps((prev) => [...prev, saved]);
-      setPicked((p) => new Set(p).add(saved.id));
-      setCustomPkg('');
-      toast.push('ok', 'App added & selected', `${trimmed} added to Library and selected.`);
-    } catch (e) {
-      const found = (await listApplications(trimmed).catch(() => [])).find((a) => a.pkg === trimmed);
-      if (found?.id) {
-        setExtraApps((prev) => [...prev, found]);
-        setPicked((p) => new Set(p).add(found.id));
-        setCustomPkg('');
-        toast.push('ok', 'App selected', `${trimmed} found in Library and selected.`);
-      } else {
-        toast.push('err', 'Could not add app', e instanceof Error ? e.message : 'Save failed');
-      }
-    } finally {
-      setBusy(false);
-    }
   }
 
   return (
@@ -130,29 +82,6 @@ export function AppPicker({
               </button>
             ))}
           </span>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, margin: '8px 0 12px 0' }}>
-          <input
-            className="input mono"
-            style={{ flex: 1, fontSize: 13 }}
-            placeholder="Quick add package name (e.g. com.android.chrome)…"
-            value={customPkg}
-            onChange={(e) => setCustomPkg(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                void handleQuickAddPkg();
-              }
-            }}
-          />
-          <button
-            className="btn btn-sm"
-            onClick={() => void handleQuickAddPkg()}
-            disabled={busy || !customPkg.trim()}
-          >
-            {busy ? 'Adding…' : 'Add by Package'}
-          </button>
         </div>
 
         <div className="picker-list">

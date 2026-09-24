@@ -57,7 +57,6 @@ public class ConfigurationResource {
     private PushService pushService;
     private CustomerDAO customerDAO;
     private UserDAO userDAO;
-    private com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller;
     private String baseUrl;
 
     /**
@@ -72,14 +71,12 @@ public class ConfigurationResource {
                                  PushService pushService,
                                  CustomerDAO customerDAO,
                                  UserDAO userDAO,
-                                 com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller,
                                  @Named("base.url") String baseUrl) {
         this.configurationDAO = configurationDAO;
         this.applicationDAO = applicationDAO;
         this.pushService = pushService;
         this.customerDAO = customerDAO;
         this.userDAO = userDAO;
-        this.configAppInstaller = configAppInstaller;
         this.baseUrl = baseUrl;
     }
     // =================================================================================================================
@@ -209,9 +206,6 @@ public class ConfigurationResource {
                     log.info("Configuration " + configuration.getName() + " updated by user "  + SecurityContext.get().getCurrentUserName());
                     this.configurationDAO.updateConfiguration(configuration);
                     this.pushService.notifyDevicesOnUpdate(configuration.getId());
-                    if (this.configAppInstaller != null) {
-                        this.configAppInstaller.enqueueConfigAppsForConfiguration(configuration.getId());
-                    }
                 }
                 configuration = getConfiguration(configuration.getId());
 
@@ -242,9 +236,6 @@ public class ConfigurationResource {
         }
         try {
             this.configurationDAO.upgradeConfigurationApplication(request.getConfigurationId(), request.getApplicationId());
-            if (this.configAppInstaller != null) {
-                this.configAppInstaller.enqueueConfigAppsForConfiguration(request.getConfigurationId());
-            }
             final Configuration configuration = this.getConfiguration(request.getConfigurationId());
             return Response.OK(configuration);
         } catch (Exception e) {

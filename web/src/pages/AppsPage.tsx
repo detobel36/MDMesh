@@ -8,13 +8,16 @@ import {
   uploadBundle,
   commitUpload,
   saveAndroidApplication,
+  deleteApplication,
+  uploadIconFile,
+  createIcon,
   type Application,
   type BundleUploadResult,
 } from '../api/applications';
 import { searchFdroid, type FDroidApp } from '../api/fdroid';
 import { DeployModal, type DeploySubject } from '../components/DeployModal';
 
-type SourceId = 'library' | 'pkg' | 'custom' | 'fdroid' | 'play';
+type SourceId = 'library' | 'custom' | 'fdroid' | 'play';
 
 interface Source {
   id: SourceId;
@@ -25,7 +28,6 @@ interface Source {
 
 const SOURCES: Source[] = [
   { id: 'library', label: 'Library', enabled: true, tip: 'Apps already uploaded to this MDMesh server.' },
-  { id: 'pkg', label: 'Package Name', enabled: true, tip: 'Add pre-installed default system apps by Package Name to uninstall or manage.' },
   { id: 'custom', label: 'Custom APK', enabled: true, tip: 'Deploy any APK by file or URL — including APKMirror / APKPure downloads.' },
   { id: 'fdroid', label: 'F-Droid', enabled: true, tip: 'Search the F-Droid open-source catalogue and deploy straight from f-droid.org.' },
   { id: 'play', label: 'Play Store', enabled: false, tip: 'Download via a Google account (Aurora-style dispenser). Not built yet.' },
@@ -108,7 +110,6 @@ export function AppsPage() {
             .catch((e) => toast.push('err', 'Cannot deploy', e instanceof Error ? e.message : ''));
         }} />
       )}
-      {source === 'pkg' && <PackageNameSource />}
       {source === 'custom' && <CustomSource onDeploy={setDeploy} />}
       {source === 'fdroid' && <FDroidSource onDeploy={setDeploy} />}
 
@@ -135,19 +136,42 @@ function AppIcon({ name, url }: { name: string; url?: string | null }) {
 }
 
 function LibrarySource({ onDeploy }: { onDeploy: (app: Application) => void }) {
+  const toast = useToast();
   const [apps, setApps] = useState<Application[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  const [editingApp, setEditingApp] = useState<Application | null>(null);
+
+  const load = () => {
+    listApplications()
+      .then((list) => setApps(list.filter((a) => (a.type ?? 'app') !== 'web')))
+      .catch(() => {
+        setApps([]);
+        setError('Could not load the app library.');
+      });
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    listApplications()
-      .then((list) => !cancelled && setApps(list.filter((a) => (a.type ?? 'app') !== 'web')))
-      .catch(() => !cancelled && (setApps([]), setError('Could not load the app library.')));
-    return () => {
-      cancelled = true;
-    };
+    load();
   }, []);
+
+  async function doDelete(app: Application) {
+    if (!window.confirm(`Delete application "${app.name}"? This cannot be undone.`)) return;
+    try {
+      await deleteApplication(app.id);
+      toast.push('ok', 'Application deleted', app.name);
+      load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      toast.push(
+        'err',
+        'Delete failed',
+        /reference/i.test(msg) || /config/i.test(msg)
+          ? 'Application is assigned to a configuration.'
+          : msg || 'Could not delete application.',
+      );
+    }
+  }
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -182,7 +206,7 @@ function LibrarySource({ onDeploy }: { onDeploy: (app: Application) => void }) {
           {shown.map((a) => (
             <div className="app-card" key={a.id}>
               <div className="app-top">
-                <AppIcon name={a.name} />
+                <AppIcon name={a.name} url={a.icon} />
                 <div className="app-meta">
                   <div className="app-nm">{a.name}</div>
                   <div className="app-pkg mono">{a.pkg}</div>
@@ -190,91 +214,149 @@ function LibrarySource({ onDeploy }: { onDeploy: (app: Application) => void }) {
               </div>
               <div className="app-foot">
                 <span className="app-ver">{a.version ? `v${a.version}` : '—'}</span>
-                <button className="btn btn-sm btn-primary" onClick={() => onDeploy(a)}>
-                  Deploy
-                </button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn btn-sm" onClick={() => setEditingApp(a)}>
+                    Edit
+                  </button>
+                  <button className="btn btn-sm btn-danger" onClick={() => void doDelete(a)}>
+                    Delete
+                  </button>
+                  <button className="btn btn-sm btn-primary" onClick={() => onDeploy(a)}>
+                    Deploy
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {editingApp && (
+        <EditAppModal
+          app={editingApp}
+          onClose={() => setEditingApp(null)}
+          onDone={() => {
+            setEditingApp(null);
+            load();
+          }}
+        />
+      )}
     </>
   );
 }
 
-function PackageNameSource() {
+function EditAppModal({
+  app,
+  onClose,
+  onDone,
+}: {
+  app: Application;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const toast = useToast();
-  const [pkg, setPkg] = useState('');
-  const [name, setName] = useState('');
+  const [name, setName] = useState(app.name ?? '');
+  const [pkg, setPkg] = useState(app.pkg ?? '');
+  const [version, setVersion] = useState(app.version ?? '');
+  const [iconId, setIconId] = useState<number | undefined>(app.iconId);
+  const [iconPreview, setIconPreview] = useState<string | undefined>(app.icon);
+  const [uploadingIcon, setUploadingIcon] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [savedAppId, setSavedAppId] = useState<number | undefined>(undefined);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleIconChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingIcon(true);
+    try {
+      const upFile = await uploadIconFile(file);
+      if (!upFile.id) throw new Error('File upload failed');
+      const iconRec = await createIcon({ name: file.name, fileId: upFile.id });
+      setIconId(iconRec.id);
+      setIconPreview(URL.createObjectURL(file));
+      toast.push('ok', 'Picture uploaded', 'New icon ready.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('icon.dimension.invalid') || msg.includes('dimension')) {
+        toast.push('err', 'Invalid image', 'Icon image must be square (width equals height).');
+      } else {
+        toast.push('err', 'Upload failed', msg || 'Could not upload icon image.');
+      }
+    } finally {
+      setUploadingIcon(false);
+      e.target.value = '';
+    }
+  }
 
   async function save() {
-    const trimmedPkg = pkg.trim();
-    if (!trimmedPkg) {
-      toast.push('err', 'Package name required', 'Enter a package name (e.g. com.android.chrome)');
+    if (!name.trim() || !pkg.trim()) {
+      toast.push('err', 'Missing fields', 'Name and package name are required.');
       return;
     }
     setBusy(true);
     try {
-      const saved = await saveAndroidApplication({
-        name: name.trim() || trimmedPkg,
-        pkg: trimmedPkg,
-        version: '1.0',
-        versionCode: 1,
-        type: 'app',
+      await saveAndroidApplication({
+        ...app,
+        name: name.trim(),
+        pkg: pkg.trim(),
+        version: version.trim() || undefined,
+        iconId: iconId,
       });
-      setSavedAppId(saved.id);
-      toast.push('ok', 'Added to Library', `${name.trim() || trimmedPkg} is in your Library — now assignable to a configuration to uninstall or manage.`);
-      setPkg('');
-      setName('');
+      toast.push('ok', 'Application saved', name.trim());
+      onDone();
     } catch (e) {
-      const existing = (await listApplications(trimmedPkg).catch(() => [])).find((a) => a.pkg === trimmedPkg);
-      if (existing?.id) {
-        setSavedAppId(existing.id);
-        toast.push('ok', 'Already in Library', 'This app is already in your Library — you can assign it to a configuration.');
-      } else {
-        toast.push('err', 'Could not add to Library', e instanceof Error ? e.message : 'The server rejected the save.');
-      }
+      toast.push('err', 'Save failed', e instanceof Error ? e.message : 'Could not save application.');
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="panel" style={{ maxWidth: 640 }}>
-      <div className="panel-head">
-        <h2 className="panel-title">Add by Package Name</h2>
-      </div>
-      <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <p className="note" style={{ margin: 0 }}>
-          Many system or default applications are pre-installed on Android devices (e.g., <span className="mono">com.android.chrome</span>, <span className="mono">com.google.android.youtube</span>, <span className="mono">com.android.settings</span>).
-          Add them to your Library with just their Package Name, then select "Remove" in a Configuration to uninstall them from devices.
-        </p>
-        <label className="field">
-          <span className="label">Package name *</span>
-          <input
-            className="input mono"
-            value={pkg}
-            onChange={(e) => setPkg(e.target.value)}
-            placeholder="e.g. com.android.chrome"
-            autoFocus
-          />
-        </label>
-        <label className="field">
-          <span className="label">Display name</span>
-          <input
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Google Chrome (optional)"
-          />
-        </label>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button className="btn btn-primary" onClick={() => void save()} disabled={busy || !pkg.trim()}>
-            {busy ? 'Saving…' : 'Add to Library'}
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <h3>Edit application</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <AppIcon name={name || 'App'} url={iconPreview} />
+            <div>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingIcon || busy}
+              >
+                {uploadingIcon ? 'Uploading…' : 'Change picture'}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => void handleIconChange(e)}
+              />
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Square PNG/JPG image
+              </div>
+            </div>
+          </div>
+          <label className="field">
+            <span className="label">Name *</span>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="field">
+            <span className="label">Package *</span>
+            <input className="input mono" value={pkg} onChange={(e) => setPkg(e.target.value)} />
+          </label>
+          <label className="field">
+            <span className="label">Version</span>
+            <input className="input" value={version} onChange={(e) => setVersion(e.target.value)} />
+          </label>
+        </div>
+        <div className="modal-actions" style={{ marginTop: 20 }}>
+          <button className="btn" onClick={onClose} disabled={busy || uploadingIcon}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => void save()} disabled={busy || uploadingIcon}>
+            {busy ? 'Saving…' : 'Save'}
           </button>
-          {savedAppId && <span className="note" style={{ margin: 0 }}>App is in Library — assignable to a configuration.</span>}
         </div>
       </div>
     </div>
