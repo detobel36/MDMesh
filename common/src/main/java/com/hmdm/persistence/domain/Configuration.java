@@ -124,6 +124,8 @@ public class Configuration implements CustomerData, Serializable {
     private String allowedClasses;
     @ApiModelProperty("New server URL used to migrate to another server")
     private String newServerUrl;
+    @ApiModelProperty("DNS IP address or hostname for automatic DNS configuration")
+    private String dns;
     @ApiModelProperty("Flag disabling safe settings")
     private Boolean lockSafeSettings;
     @ApiModelProperty("Flag enabling permissive mode")
@@ -812,6 +814,14 @@ public class Configuration implements CustomerData, Serializable {
         this.newServerUrl = newServerUrl;
     }
 
+    public String getDns() {
+        return dns;
+    }
+
+    public void setDns(String dns) {
+        this.dns = dns;
+    }
+
     public Boolean getLockSafeSettings() {
         return lockSafeSettings;
     }
@@ -935,6 +945,7 @@ public class Configuration implements CustomerData, Serializable {
         copy.setTimeZone(getTimeZone());
         copy.setAllowedClasses(getAllowedClasses());
         copy.setNewServerUrl(getNewServerUrl());
+        copy.setDns(getDns());
         copy.setLockSafeSettings(getLockSafeSettings());
         copy.setPermissive(getPermissive());
         copy.setKioskExit(getKioskExit());

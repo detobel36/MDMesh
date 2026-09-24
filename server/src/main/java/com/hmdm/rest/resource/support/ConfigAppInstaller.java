@@ -17,6 +17,7 @@ import com.hmdm.persistence.AgentCommandDAO;
 import com.hmdm.persistence.UnsecureDAO;
 import com.hmdm.persistence.domain.AgentCommand;
 import com.hmdm.persistence.domain.Application;
+import com.hmdm.persistence.domain.Configuration;
 import com.hmdm.persistence.domain.Device;
 import com.hmdm.util.RolloutProgress;
 import org.slf4j.Logger;
@@ -100,6 +101,19 @@ public class ConfigAppInstaller {
                     queued++;
                 }
             }
+            Configuration cfg = unsecureDAO.getConfigurationById(device.getConfigurationId());
+            if (cfg != null && cfg.getDns() != null && !cfg.getDns().trim().isEmpty()) {
+                AgentCommand cmd = new AgentCommand();
+                cmd.setDeviceNumber(device.getNumber());
+                cmd.setType("policy.apply");
+                cmd.setPayload("{\"policy\":\"dns\",\"value\":\"" + cfg.getDns().trim().replace("\"", "\\\"") + "\"}");
+                cmd.setRequiresCapability("policy.dns");
+                cmd.setStatus("pending");
+                cmd.setCreatedAt(now);
+                commandDAO.insert(cmd);
+                queued++;
+            }
+
             if (queued > 0) {
                 wakeHub.wake(device.getNumber(), "commands");
             }

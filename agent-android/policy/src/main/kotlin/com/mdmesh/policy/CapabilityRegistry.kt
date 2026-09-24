@@ -4,6 +4,8 @@ import com.mdmesh.policy.bluetooth.BluetoothPolicy
 import com.mdmesh.policy.bluetooth.BluetoothPolicyFactory
 import com.mdmesh.policy.camera.CameraPolicy
 import com.mdmesh.policy.camera.CameraPolicyFactory
+import com.mdmesh.policy.dns.DnsPolicy
+import com.mdmesh.policy.dns.DnsPolicyFactory
 import com.mdmesh.policy.screenshots.ScreenshotsPolicy
 import com.mdmesh.policy.screenshots.ScreenshotsPolicyFactory
 import com.mdmesh.policy.usb.UsbStoragePolicy
@@ -52,16 +54,21 @@ class CapabilityRegistry(
      * registered strategies, so it can never drift from what can actually be applied.
      * Each entry corresponds to a row in `proto/registry.md` § policy.
      */
-    fun supportedPolicyKeys(): List<String> = togglePolicies().keys.toList()
+    fun supportedPolicyKeys(): List<String> = buildList {
+        addAll(togglePolicies().keys)
+        DnsPolicyFactory.create(handle)?.let { add(DnsPolicy.CAPABILITY_KEY) }
+    }
 
     /** Convenience: resolve the live [DeviceControl] facade for this device. */
     fun deviceControl(): DeviceControl? {
         val wifi = WifiPolicyFactory.create(handle) ?: return null
-        return DefaultDeviceControl(wifi)
+        val dns = DnsPolicyFactory.create(handle)
+        return DefaultDeviceControl(wifi, dns)
     }
 }
 
 /** Default [DeviceControl] facade wiring the selected strategies together. */
 internal class DefaultDeviceControl(
     override val wifi: WifiPolicy,
+    override val dns: DnsPolicy? = null,
 ) : DeviceControl

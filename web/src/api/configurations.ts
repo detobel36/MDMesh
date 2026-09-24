@@ -43,6 +43,7 @@ export interface Configuration {
   name: string;
   description?: string;
   qrCodeKey?: string;
+  dns?: string | null;
   applications?: ConfigApp[];
   [key: string]: unknown;
 }
