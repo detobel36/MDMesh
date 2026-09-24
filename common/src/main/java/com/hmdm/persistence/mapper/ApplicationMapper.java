@@ -43,10 +43,13 @@ public interface ApplicationMapper {
                     "applicationVersions.version, applicationVersions.versionCode, applicationVersions.url," +
                     "applicationVersions.split, applicationVersions.urlArmeabi, applicationVersions.urlArm64," +
                     "applications.latestVersion AS usedVersionId, " +
-                    "(usageData.usageCount > 0) AS deletionProhibited " +
+                    "(usageData.usageCount > 0) AS deletionProhibited, " +
+                    "uploadedFiles.filepath AS icon " +
             "FROM applications " +
             "INNER JOIN customers ON customers.id = applications.customerId " +
             "INNER JOIN applicationVersions ON applicationVersions.id = applications.latestVersion " +
+            "LEFT JOIN icons ON icons.id = applications.iconId " +
+            "LEFT JOIN uploadedFiles ON uploadedFiles.id = icons.fileId " +
             "LEFT JOIN (SELECT applicationVersions.applicationId AS id, COUNT(*) AS usageCount " +
             "            FROM applicationVersions " +
             "            INNER JOIN configurationApplications c ON applicationVersions.id = c.applicationVersionId" +
@@ -57,10 +60,13 @@ public interface ApplicationMapper {
                     "applicationVersions.version, applicationVersions.versionCode, applicationVersions.url, " +
                     "applicationVersions.split, applicationVersions.urlArmeabi, applicationVersions.urlArm64," +
                     "applications.latestVersion AS usedVersionId, " +
-                    "(usageData.usageCount > 0) AS deletionProhibited " +
+                    "(usageData.usageCount > 0) AS deletionProhibited, " +
+                    "uploadedFiles.filepath AS icon " +
                     "FROM applicationVersions " +
                     "INNER JOIN applications ON applicationVersions.id = applications.latestVersion " +
                     "INNER JOIN customers ON customers.id = applications.customerId " +
+                    "LEFT JOIN icons ON icons.id = applications.iconId " +
+                    "LEFT JOIN uploadedFiles ON uploadedFiles.id = icons.fileId " +
                     "LEFT JOIN (SELECT applicationVersions.applicationId AS id, COUNT(*) AS usageCount " +
                     "           FROM applicationVersions " +
                     "           INNER JOIN configurationApplications c ON applicationVersions.id = c.applicationVersionId" +
@@ -95,7 +101,7 @@ public interface ApplicationMapper {
     ;
 
     @Select({SELECT_BASE +
-            "WHERE customerId = #{customerId} " +
+            "WHERE applications.customerId = #{customerId} " +
             "OR customers.master = TRUE " +
             "   AND NOT EXISTS" +
             "    (" +
@@ -106,11 +112,11 @@ public interface ApplicationMapper {
             "     AND apps2.pkg=applications.pkg " +
             "     AND ver2.version=applicationVersions.version" +
             "    )" +
-            "ORDER BY name"})
+            "ORDER BY applications.name"})
     List<Application> getAllApplications(@Param("customerId") int customerId);
 
     @Select({SELECT_BASE +
-            "WHERE (customerId = #{customerId} " +
+            "WHERE (applications.customerId = #{customerId} " +
             "OR customers.master = TRUE" +
             "   AND NOT EXISTS" +
             "    (" +
@@ -122,12 +128,12 @@ public interface ApplicationMapper {
             "     AND ver2.version=applicationVersions.version" +
             "    )" +
             ")" +
-            "AND (applications.name ILIKE #{value} OR pkg ILIKE #{value}) " +
+            "AND (applications.name ILIKE #{value} OR applications.pkg ILIKE #{value}) " +
             "ORDER BY applications.name"})
     List<Application> getAllApplicationsByValue(@Param("customerId") int customerId, @Param("value") String value);
 
     @Select({SELECT_BASE +
-            "WHERE (customerId = #{customerId})" +
+            "WHERE (applications.customerId = #{customerId})" +
             "AND (applicationVersions.url=#{url} OR applicationVersions.urlarmeabi=#{url} OR applicationVersions.urlarm64=#{url}) " +
             "ORDER BY applications.name"})
     List<Application> getAllApplicationsByUrl(@Param("customerId") int customerId, @Param("url") String url);
@@ -249,29 +255,29 @@ public interface ApplicationMapper {
                                                 @Param("confs") List<ApplicationVersionConfigurationLink> configurations);
 
     @Select({SELECT_BY_VERSION_BASE +
-            "WHERE (customerId = #{customerId} OR customers.master = TRUE )" +
-            "AND pkg = #{pkg} " +
+            "WHERE (applications.customerId = #{customerId} OR customers.master = TRUE )" +
+            "AND applications.pkg = #{pkg} " +
             "AND applicationVersions.version=#{version}"})
     List<Application> findByPackageIdAndVersion(@Param("customerId") int customerId,
                                                 @Param("pkg") String pkg,
                                                 @Param("version") String version);
 
     @Select({SELECT_BY_VERSION_BASE +
-            "WHERE (customerId = #{customerId} OR customers.master = TRUE )" +
-            "AND pkg = #{pkg} " +
+            "WHERE (applications.customerId = #{customerId} OR customers.master = TRUE )" +
+            "AND applications.pkg = #{pkg} " +
             "AND mdm_app_version_comparison_index(applicationVersions.version) > mdm_app_version_comparison_index(#{version})"})
     List<Application> findByPackageIdAndNewerVersion(@Param("customerId") int customerId,
                                                      @Param("pkg") String pkg,
                                                      @Param("version") String version);
 
     @Select({SELECT_BY_VERSION_BASE +
-            "WHERE (customerId = #{customerId} OR customers.master = TRUE )" +
-            "AND pkg = #{pkg}"})
+            "WHERE (applications.customerId = #{customerId} OR customers.master = TRUE )" +
+            "AND applications.pkg = #{pkg}"})
     List<Application> findByPackageId(@Param("customerId") int customerId,
                                       @Param("pkg") String pkg);
 
     @Select({SELECT_BY_VERSION_BASE +
-            "WHERE (customerId = #{customerId} OR customers.master = TRUE )" +
+            "WHERE (applications.customerId = #{customerId} OR customers.master = TRUE )" +
             "AND applications.name ILIKE #{name}"})
     List<Application> findByName(@Param("customerId") int customerId,
                                       @Param("name") String name);
@@ -284,7 +290,7 @@ public interface ApplicationMapper {
     Long countByPackageId(@Param("customerId") int customerId, @Param("pkg") String pkg);
 
     @Select({SELECT_BY_VERSION_BASE +
-            "WHERE pkg = #{pkg}"})
+            "WHERE applications.pkg = #{pkg}"})
     List<Application> findAllByPackageId(@Param("pkg") String pkg);
 
     @Select({SELECT_BASE +
@@ -292,11 +298,11 @@ public interface ApplicationMapper {
     Application findById(@Param("id") int id);
 
     @Select({SELECT_BASE +
-            "ORDER BY name"})
+            "ORDER BY applications.name"})
     List<Application> getAllAdminApplications();
 
     @Select({SELECT_BASE +
-            "WHERE (applications.name ILIKE #{value} OR pkg ILIKE #{value}) " +
+            "WHERE (applications.name ILIKE #{value} OR applications.pkg ILIKE #{value}) " +
             "ORDER BY applications.name"})
     List<Application> getAllAdminApplicationsByValue(String value);
 

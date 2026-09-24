@@ -157,3 +157,26 @@ export async function commitUpload(serverPath: string): Promise<UploadedFileView
     external: false,
   });
 }
+
+/** Delete an application from the Library by ID. */
+export async function deleteApplication(id: number): Promise<void> {
+  await apiClient.del(`/private/applications/${id}`);
+}
+
+/** Upload an icon image file (must be square). Returns the uploaded file record containing fileId and filePath. */
+export async function uploadIconFile(file: File): Promise<UploadedFileView> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  return apiClient.postForm<UploadedFileView>('/private/icon-files', form);
+}
+
+export interface IconRecord {
+  id?: number;
+  name: string;
+  fileId: number;
+}
+
+/** Create or update an Icon record on the server. Returns the saved Icon containing its id. */
+export async function createIcon(icon: IconRecord): Promise<IconRecord> {
+  return apiClient.put<IconRecord>('/private/icons', icon);
+}
