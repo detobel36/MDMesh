@@ -16,6 +16,7 @@ import {
 } from '../api/applications';
 import { searchFdroid, type FDroidApp } from '../api/fdroid';
 import { DeployModal, type DeploySubject } from '../components/DeployModal';
+import { FetchFromDevicesModal } from '../components/FetchFromDevicesModal';
 
 type SourceId = 'library' | 'custom' | 'fdroid' | 'play';
 
@@ -75,11 +76,20 @@ export function AppsPage() {
   const toast = useToast();
   const [source, setSource] = useState<SourceId>('library');
   const [deploy, setDeploy] = useState<DeploySubject | null>(null);
+  const [fetchModalOpen, setFetchModalOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   return (
     <AppShell title="Apps">
-      <div className="page-head">
+      <div className="page-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>Apps</h1>
+        <button
+          className="btn btn-secondary"
+          onClick={() => setFetchModalOpen(true)}
+          title="Scan installed applications from connected devices and import missing apps to Library"
+        >
+          Fetch from devices
+        </button>
       </div>
 
       <span className="seg modes" role="tablist" aria-label="App source" style={{ marginBottom: 16 }}>
@@ -104,16 +114,25 @@ export function AppsPage() {
       </span>
 
       {source === 'library' && (
-        <LibrarySource onDeploy={(app) => {
-          resolveApp(app)
-            .then(setDeploy)
-            .catch((e) => toast.push('err', 'Cannot deploy', e instanceof Error ? e.message : ''));
-        }} />
+        <LibrarySource
+          key={refreshKey}
+          onDeploy={(app) => {
+            resolveApp(app)
+              .then(setDeploy)
+              .catch((e) => toast.push('err', 'Cannot deploy', e instanceof Error ? e.message : ''));
+          }}
+        />
       )}
       {source === 'custom' && <CustomSource onDeploy={setDeploy} />}
       {source === 'fdroid' && <FDroidSource onDeploy={setDeploy} />}
 
       {deploy && <DeployModal subject={deploy} onClose={() => setDeploy(null)} />}
+      {fetchModalOpen && (
+        <FetchFromDevicesModal
+          onClose={() => setFetchModalOpen(false)}
+          onDone={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
     </AppShell>
   );
 }
