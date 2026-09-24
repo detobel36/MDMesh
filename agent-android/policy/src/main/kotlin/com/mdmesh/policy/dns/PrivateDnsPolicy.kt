@@ -20,7 +20,7 @@ internal class PrivateDnsPolicy(
 
     override fun isSupported(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            (handle.dpm.isAdminActive(handle.admin) || handle.dpm.isDeviceOwnerApp(handle.admin.packageName))
+            handle.dpm.isDeviceOwnerApp(handle.admin.packageName)
 
     override fun setDnsHost(dnsHost: String?): PolicyOutcome {
         if (!isSupported()) return PolicyOutcome.Unsupported
