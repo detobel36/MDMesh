@@ -722,9 +722,10 @@ function LauncherDesignControl({
   readOnly: boolean;
   setDraft: React.Dispatch<React.SetStateAction<Configuration>>;
 }) {
-  const mode = getDesignMode(draft);
+  const [mode, setMode] = useState<DesignMode>(() => getDesignMode(draft));
 
   const handleModeChange = (newMode: DesignMode) => {
+    setMode(newMode);
     if (newMode === 'COLOR') {
       setDraft((d) => ({
         ...d,
