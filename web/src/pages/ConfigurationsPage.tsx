@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppShell } from '../ui/AppShell';
 import { useToast } from '../ui/toast';
 import {
@@ -7,6 +7,7 @@ import {
   saveConfiguration,
   deleteConfiguration,
   copyConfiguration,
+  uploadBackgroundImage,
   type Configuration,
   type ConfigApp,
 } from '../api/configurations';
@@ -420,7 +421,7 @@ function ConfigEditor({
 
       <section className="panel cfg-panel">
         {FOCUSED_FIELDS.map((f) => (
-          <Field key={f.key} def={f} value={draft[f.key]} apps={apps} disabled={readOnly} onChange={(v) => set(f.key, v)} />
+          <Field key={f.key} def={f} value={draft[f.key]} apps={apps} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
         ))}
       </section>
 
@@ -463,14 +464,32 @@ function ConfigEditor({
       </button>
 
       {advanced &&
-        advByGroup.map(({ group, fields }) => (
-          <section className="panel cfg-panel" key={group}>
-            <div className="cfg-sec-h">{group}</div>
-            {fields.map((f) => (
-              <Field key={f.key} def={f} value={draft[f.key]} apps={apps} disabled={readOnly} onChange={(v) => set(f.key, v)} />
-            ))}
-          </section>
-        ))}
+        advByGroup.map(({ group, fields }) => {
+          if (group === 'Display') {
+            const designKeys = new Set(['useDefaultDesignSettings', 'backgroundColor', 'textColor', 'backgroundImageUrl']);
+            const otherFields = fields.filter((f) => !designKeys.has(f.key));
+            return (
+              <section className="panel cfg-panel" key={group}>
+                <div className="cfg-sec-h">{group}</div>
+                {otherFields.filter((f) => ['autoBrightness', 'brightness', 'manageTimeout', 'timeout', 'manageVolume', 'volume', 'orientation'].includes(f.key)).map((f) => (
+                  <Field key={f.key} def={f} value={draft[f.key]} apps={apps} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
+                ))}
+                <LauncherDesignControl draft={draft} readOnly={readOnly} setDraft={setDraft} />
+                {otherFields.filter((f) => !['autoBrightness', 'brightness', 'manageTimeout', 'timeout', 'manageVolume', 'volume', 'orientation'].includes(f.key)).map((f) => (
+                  <Field key={f.key} def={f} value={draft[f.key]} apps={apps} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
+                ))}
+              </section>
+            );
+          }
+          return (
+            <section className="panel cfg-panel" key={group}>
+              <div className="cfg-sec-h">{group}</div>
+              {fields.map((f) => (
+                <Field key={f.key} def={f} value={draft[f.key]} apps={apps} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
+              ))}
+            </section>
+          );
+        })}
 
       {pickerOpen && (
         <AppPicker
@@ -490,12 +509,14 @@ function Field({
   value,
   apps,
   disabled,
+  configName,
   onChange,
 }: {
   def: FieldDef;
   value: unknown;
   apps: Application[];
   disabled?: boolean;
+  configName?: string;
   onChange: (v: unknown) => void;
 }) {
   return (
@@ -505,13 +526,224 @@ function Field({
         <span className="cfg-field-help">{def.help}</span>
       </div>
       <div className="cfg-field-ctl">
-        <FieldControl def={def} value={value} apps={apps} disabled={disabled} onChange={onChange} />
+        <FieldControl def={def} value={value} apps={apps} disabled={disabled} configName={configName} onChange={onChange} />
       </div>
     </div>
   );
 }
 
-function FieldControl({ def, value, apps, disabled, onChange }: { def: FieldDef; value: unknown; apps: Application[]; disabled?: boolean; onChange: (v: unknown) => void }) {
+function BackgroundImageControl({
+  value,
+  disabled,
+  configName,
+  onChange,
+}: {
+  value: unknown;
+  disabled?: boolean;
+  configName?: string;
+  onChange: (v: unknown) => void;
+}) {
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function onFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!configName || !configName.trim()) {
+      toast.push('err', 'Name required', 'Please enter a configuration name before uploading a background.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const res = await uploadBackgroundImage(file, configName.trim());
+      onChange(res.url);
+      toast.push('ok', 'Background uploaded', 'Background image uploaded successfully.');
+    } catch (err) {
+      toast.push('err', 'Upload failed', err instanceof Error ? err.message : '');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
+      <input
+        className="input"
+        type="text"
+        value={value == null ? '' : String(value)}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="https://..."
+        style={{ flex: 1 }}
+      />
+      {!disabled && (
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={(e) => void onFileSelected(e)}
+          />
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+          >
+            {uploading ? 'Uploading…' : 'Upload picture'}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+type DesignMode = 'DEFAULT' | 'COLOR' | 'IMAGE';
+
+function getDesignMode(draft: Configuration): DesignMode {
+  if (draft.useDefaultDesignSettings) return 'DEFAULT';
+  if (draft.backgroundImageUrl !== null && draft.backgroundImageUrl !== undefined) return 'IMAGE';
+  return 'COLOR';
+}
+
+function LauncherDesignControl({
+  draft,
+  readOnly,
+  setDraft,
+}: {
+  draft: Configuration;
+  readOnly: boolean;
+  setDraft: React.Dispatch<React.SetStateAction<Configuration>>;
+}) {
+  const mode = getDesignMode(draft);
+
+  const handleModeChange = (newMode: DesignMode) => {
+    if (newMode === 'DEFAULT') {
+      setDraft((d) => ({
+        ...d,
+        useDefaultDesignSettings: true,
+        backgroundImageUrl: null,
+      }));
+    } else if (newMode === 'COLOR') {
+      setDraft((d) => ({
+        ...d,
+        useDefaultDesignSettings: false,
+        backgroundImageUrl: null,
+      }));
+    } else if (newMode === 'IMAGE') {
+      setDraft((d) => ({
+        ...d,
+        useDefaultDesignSettings: false,
+        backgroundImageUrl: d.backgroundImageUrl ?? '',
+      }));
+    }
+  };
+
+  return (
+    <div className="cfg-field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '10px' }}>
+      <div className="cfg-field-label">
+        <label>Launcher design</label>
+        <span className="cfg-field-help">
+          Select default server design, custom background color, or a custom background picture.
+        </span>
+      </div>
+      <div className="cfg-field-ctl" style={{ width: '100%', flexDirection: 'column', gap: '12px' }}>
+        <span className="seg">
+          {[
+            { v: 'DEFAULT', l: 'Default design' },
+            { v: 'COLOR', l: 'Custom color' },
+            { v: 'IMAGE', l: 'Background picture' },
+          ].map((o) => (
+            <button
+              key={o.v}
+              type="button"
+              className={mode === o.v ? 'on' : ''}
+              disabled={readOnly}
+              onClick={() => handleModeChange(o.v as DesignMode)}
+            >
+              {o.l}
+            </button>
+          ))}
+        </span>
+
+        {mode === 'DEFAULT' && (
+          <div className="note" style={{ margin: 0 }}>
+            Using default design settings from global server settings.
+          </div>
+        )}
+
+        {mode === 'COLOR' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', width: '100%' }}>
+            <div>
+              <label className="cfg-field-label" style={{ fontSize: 13, marginBottom: 4, display: 'block' }}>Background color</label>
+              <input
+                type="color"
+                value={draft.backgroundColor ? String(draft.backgroundColor) : '#ffffff'}
+                disabled={readOnly}
+                onChange={(e) => setDraft((d) => ({ ...d, backgroundColor: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="cfg-field-label" style={{ fontSize: 13, marginBottom: 4, display: 'block' }}>Text color</label>
+              <input
+                type="color"
+                value={draft.textColor ? String(draft.textColor) : '#000000'}
+                disabled={readOnly}
+                onChange={(e) => setDraft((d) => ({ ...d, textColor: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+
+        {mode === 'IMAGE' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
+            <div>
+              <label className="cfg-field-label" style={{ fontSize: 13, marginBottom: 4, display: 'block' }}>Background image URL</label>
+              <BackgroundImageControl
+                value={draft.backgroundImageUrl}
+                disabled={readOnly}
+                configName={draft.name}
+                onChange={(url) => setDraft((d) => ({ ...d, backgroundImageUrl: url, useDefaultDesignSettings: false }))}
+              />
+            </div>
+            <div>
+              <label className="cfg-field-label" style={{ fontSize: 13, marginBottom: 4, display: 'block' }}>Text color</label>
+              <input
+                type="color"
+                value={draft.textColor ? String(draft.textColor) : '#000000'}
+                disabled={readOnly}
+                onChange={(e) => setDraft((d) => ({ ...d, textColor: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FieldControl({
+  def,
+  value,
+  apps,
+  disabled,
+  configName,
+  onChange,
+}: {
+  def: FieldDef;
+  value: unknown;
+  apps: Application[];
+  disabled?: boolean;
+  configName?: string;
+  onChange: (v: unknown) => void;
+}) {
+  if (def.key === 'backgroundImageUrl') {
+    return <BackgroundImageControl value={value} disabled={disabled} configName={configName} onChange={onChange} />;
+  }
+
   switch (def.type) {
     case 'switch':
       return (
