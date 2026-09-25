@@ -2,6 +2,7 @@ package com.mdmesh.core.command.handlers
 
 import com.mdmesh.core.command.CommandHandler
 import com.mdmesh.core.command.CommandResults
+import com.mdmesh.core.telemetry.EventSink
 import com.mdmesh.proto.CommandEnvelope
 import com.mdmesh.proto.CommandResult
 import com.mdmesh.proto.ProtocolJson
@@ -13,6 +14,7 @@ import com.mdmesh.remote.RemoteControlSession
  */
 class RemoteStartSessionHandler(
     private val session: RemoteControlSession,
+    private val eventSink: EventSink? = null,
 ) : CommandHandler {
 
     override val type: String = "remote.startSession"
@@ -22,8 +24,11 @@ class RemoteStartSessionHandler(
         val payload = runCatching {
             ProtocolJson.json.decodeFromString<RemoteStartSessionPayload>(payloadJson.toString())
         }.getOrElse {
+            eventSink?.record("remote.startSession", "Invalid payload: ${it.message}")
             return CommandResults.failed(command, "invalid payload: ${it.message}")
         }
+
+        eventSink?.record("remote.startSession", "Received request for screen sharing (session: ${payload.sessionId}, mode: ${payload.mode})")
 
         val mode = if (payload.mode.equals("control", ignoreCase = true)) {
             RemoteControlSession.Mode.CONTROL
@@ -33,9 +38,12 @@ class RemoteStartSessionHandler(
 
         val result = session.start(payload.sessionId, mode)
         return if (result.isSuccess) {
+            eventSink?.record("remote.startSession", "Screen sharing started (session: ${payload.sessionId})")
             CommandResults.done(command, "remote session started: ${payload.sessionId}")
         } else {
-            CommandResults.failed(command, result.exceptionOrNull()?.message ?: "start session failed")
+            val err = result.exceptionOrNull()?.message ?: "start session failed"
+            eventSink?.record("remote.startSession", "Screen sharing failed: $err")
+            CommandResults.failed(command, err)
         }
     }
 }

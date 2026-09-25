@@ -348,13 +348,19 @@ object AgentModule {
 
     @Provides
     @IntoSet
-    fun provideRemoteStartSessionHandler(session: RemoteControlSession): CommandHandler =
-        RemoteStartSessionHandler(session)
+    fun provideRemoteStartSessionHandler(
+        session: RemoteControlSession,
+        eventSink: EventSink,
+    ): CommandHandler =
+        RemoteStartSessionHandler(session, eventSink)
 
     @Provides
     @IntoSet
-    fun provideRemoteStopSessionHandler(session: RemoteControlSession): CommandHandler =
-        RemoteStopSessionHandler(session)
+    fun provideRemoteStopSessionHandler(
+        session: RemoteControlSession,
+        eventSink: EventSink,
+    ): CommandHandler =
+        RemoteStopSessionHandler(session, eventSink)
 
     // --- Desired-state configuration (config.apply) ---
 

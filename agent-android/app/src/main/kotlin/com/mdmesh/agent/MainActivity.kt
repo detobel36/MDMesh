@@ -113,7 +113,16 @@ class MainActivity : ComponentActivity() {
         } else {
             "Sync: OK"
         }
-        val info = "$errStr\nDevice Owner: ${isDeviceOwner()}\nAgent Version: ${com.mdmesh.agent.BuildConfig.VERSION_NAME}"
+        val recentEvents = eventLog.peekRecent(10)
+        val eventsText = if (recentEvents.isEmpty()) {
+            "No recent device events"
+        } else {
+            recentEvents.joinToString("\n") { ev ->
+                val at = DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(ev.ts))
+                "[$at] ${ev.type}${if (!ev.detail.isNullOrBlank()) ": " + ev.detail else ""}"
+            }
+        }
+        val info = "$errStr\nDevice Owner: ${isDeviceOwner()}\nAgent Version: ${com.mdmesh.agent.BuildConfig.VERSION_NAME}\n\nRecent Device Logs:\n$eventsText"
         debugLogsValue.text = info
     }
 
