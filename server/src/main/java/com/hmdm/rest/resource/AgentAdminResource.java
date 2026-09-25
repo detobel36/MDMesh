@@ -83,6 +83,7 @@ public class AgentAdminResource {
     private AgentWakeHub wakeHub;
     private com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller;
     private ConfigReconciler configReconciler;
+    private com.hmdm.rest.resource.support.RemoteSessionManager remoteSessionManager;
 
     /**
      * <p>A constructor required by Swagger.</p>
@@ -96,13 +97,15 @@ public class AgentAdminResource {
                               UnsecureDAO unsecureDAO,
                               AgentWakeHub wakeHub,
                               com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller,
-                              ConfigReconciler configReconciler) {
+                              ConfigReconciler configReconciler,
+                              com.hmdm.rest.resource.support.RemoteSessionManager remoteSessionManager) {
         this.tokenDAO = tokenDAO;
         this.commandDAO = commandDAO;
         this.unsecureDAO = unsecureDAO;
         this.wakeHub = wakeHub;
         this.configAppInstaller = configAppInstaller;
         this.configReconciler = configReconciler;
+        this.remoteSessionManager = remoteSessionManager;
     }
 
     // =================================================================================================================
@@ -456,6 +459,131 @@ public class AgentAdminResource {
             return Response.PERMISSION_DENIED();
         }
         wakeHub.wake(deviceId, "commands");
+        return Response.OK();
+    }
+
+    // =================================================================================================================
+    @ApiOperation(value = "Start remote viewing session", notes = "Creates a WebRTC remote session and enqueues remote.startSession command.")
+    @POST
+    @Path("/devices/{deviceId}/remote/start")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response startRemoteSession(@PathParam("deviceId") String deviceId) {
+        Optional<Integer> customerId = SecurityContext.get().getCurrentCustomerId();
+        if (!customerId.isPresent()) {
+            return Response.PERMISSION_DENIED();
+        }
+        Device device = unsecureDAO.getDeviceByNumber(deviceId);
+        if (device == null) {
+            return Response.ERROR("error.agent.device.unknown");
+        }
+        if (device.getCustomerId() != customerId.get()) {
+            return Response.PERMISSION_DENIED();
+        }
+
+        Set<String> tokens = AgentCapabilityTokens.flatten(commandDAO.getDeviceCapabilities(deviceId));
+        if (!AgentCapabilityTokens.isAllowed("remote.view", tokens) && !AgentCapabilityTokens.isAllowed("remote.control", tokens)) {
+            return Response.ERROR("error.agent.capability.unsupported");
+        }
+
+        String sessionId = UUID.randomUUID().toString();
+        remoteSessionManager.createSession(sessionId, deviceId, customerId.get(), "view");
+
+        AgentCommand command = new AgentCommand();
+        command.setDeviceNumber(deviceId);
+        command.setType("remote.startSession");
+        command.setPayload("{\"sessionId\":\"" + sessionId + "\",\"mode\":\"view\"}");
+        command.setRequiresCapability("remote.view");
+        command.setStatus("pending");
+        command.setCreatedAt(System.currentTimeMillis());
+        commandDAO.insert(command);
+
+        wakeHub.wake(deviceId, "commands");
+
+        logger.info("Remote viewing session {} started for device {}", sessionId, deviceId);
+        return Response.OK(java.util.Collections.singletonMap("sessionId", sessionId));
+    }
+
+    // =================================================================================================================
+    @ApiOperation(value = "Send remote signal from browser", notes = "Browser posts SDP answer or ICE candidate signal.")
+    @POST
+    @Path("/devices/{deviceId}/remote/session/{sessionId}/signal")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response sendRemoteSignal(@PathParam("deviceId") String deviceId,
+                                     @PathParam("sessionId") String sessionId,
+                                     Object signal) {
+        Optional<Integer> customerId = SecurityContext.get().getCurrentCustomerId();
+        if (!customerId.isPresent()) {
+            return Response.PERMISSION_DENIED();
+        }
+        Device device = unsecureDAO.getDeviceByNumber(deviceId);
+        if (device == null || device.getCustomerId() != customerId.get()) {
+            return Response.PERMISSION_DENIED();
+        }
+
+        com.hmdm.rest.resource.support.RemoteSessionManager.RemoteSession session = remoteSessionManager.getSession(sessionId);
+        if (session == null || !session.getDeviceNumber().equals(deviceId) || session.getCustomerId() != customerId.get()) {
+            return Response.ERROR("error.agent.session.notFound");
+        }
+
+        session.pushBrowserSignal(signal);
+        return Response.OK();
+    }
+
+    // =================================================================================================================
+    @ApiOperation(value = "Get remote signals for browser", notes = "Browser polls SDP offer/ICE candidate signals from agent.")
+    @GET
+    @Path("/devices/{deviceId}/remote/session/{sessionId}/signals")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getRemoteSignals(@PathParam("deviceId") String deviceId,
+                                     @PathParam("sessionId") String sessionId) {
+        Optional<Integer> customerId = SecurityContext.get().getCurrentCustomerId();
+        if (!customerId.isPresent()) {
+            return Response.PERMISSION_DENIED();
+        }
+        Device device = unsecureDAO.getDeviceByNumber(deviceId);
+        if (device == null || device.getCustomerId() != customerId.get()) {
+            return Response.PERMISSION_DENIED();
+        }
+
+        com.hmdm.rest.resource.support.RemoteSessionManager.RemoteSession session = remoteSessionManager.getSession(sessionId);
+        if (session == null || !session.getDeviceNumber().equals(deviceId) || session.getCustomerId() != customerId.get()) {
+            return Response.ERROR("error.agent.session.notFound");
+        }
+
+        List<Object> signals = session.pollAgentSignals();
+        return Response.OK(signals);
+    }
+
+    // =================================================================================================================
+    @ApiOperation(value = "Stop remote session", notes = "Stops a remote viewing session and enqueues remote.stopSession command.")
+    @POST
+    @Path("/devices/{deviceId}/remote/session/{sessionId}/stop")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response stopRemoteSession(@PathParam("deviceId") String deviceId,
+                                    @PathParam("sessionId") String sessionId) {
+        Optional<Integer> customerId = SecurityContext.get().getCurrentCustomerId();
+        if (!customerId.isPresent()) {
+            return Response.PERMISSION_DENIED();
+        }
+        Device device = unsecureDAO.getDeviceByNumber(deviceId);
+        if (device == null || device.getCustomerId() != customerId.get()) {
+            return Response.PERMISSION_DENIED();
+        }
+
+        remoteSessionManager.stopSession(sessionId);
+
+        AgentCommand command = new AgentCommand();
+        command.setDeviceNumber(deviceId);
+        command.setType("remote.stopSession");
+        command.setPayload("{\"sessionId\":\"" + sessionId + "\"}");
+        command.setStatus("pending");
+        command.setCreatedAt(System.currentTimeMillis());
+        commandDAO.insert(command);
+
+        wakeHub.wake(deviceId, "commands");
+
+        logger.info("Remote viewing session {} stopped for device {}", sessionId, deviceId);
         return Response.OK();
     }
 }

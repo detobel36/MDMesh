@@ -88,4 +88,19 @@ class FakeMdmApi : MdmApi {
         checkInThrows?.let { throw it }
         return checkInResponse
     }
+
+    override suspend fun sendRemoteSignal(
+        authorization: String,
+        sessionId: String,
+        signal: com.mdmesh.proto.RemoteSignalDto,
+    ): ResponseEnvelope<Unit> {
+        return ResponseEnvelope(status = "OK")
+    }
+
+    override suspend fun getRemoteSignals(
+        authorization: String,
+        sessionId: String,
+    ): ResponseEnvelope<List<com.mdmesh.proto.RemoteSignalDto>> {
+        return ResponseEnvelope(status = "OK", data = emptyList())
+    }
 }

@@ -35,6 +35,13 @@ public class ConfigAppInstallerTest {
         public List<Device> getDevicesByConfigurationId(int configurationId) {
             return devicesToReturn;
         }
+
+        @Override
+        public com.hmdm.persistence.domain.Configuration getConfigurationById(Integer id) {
+            com.hmdm.persistence.domain.Configuration cfg = new com.hmdm.persistence.domain.Configuration();
+            cfg.setId(id);
+            return cfg;
+        }
     }
 
     static class FakeCommandDAO extends AgentCommandDAO {

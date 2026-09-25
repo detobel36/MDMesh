@@ -18,6 +18,9 @@ work = "2.9.1"
 hilt = "2.52"
 hiltWork = "1.2.0"
 
+# WebRTC
+webrtc = "125.6422.06.1"
+
 # Networking + serialization
 retrofit = "2.11.0"
 retrofitSerialization = "1.0.0"
@@ -56,6 +59,9 @@ hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref
 hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
 hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltWork" }
 hilt-work-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "hiltWork" }
+
+# WebRTC
+webrtc-android = { group = "io.github.webrtc-sdk", name = "android", version.ref = "webrtc" }
 
 # Networking
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
