@@ -50,6 +50,44 @@ const NEW_CONFIG_DEFAULTS: Partial<Configuration> = {
 };
 
 /** A fresh editable draft, optionally seeded from a base config. */
+function IconGrid() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  );
+}
+
+function IconList() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <line x1="4" y1="6" x2="20" y2="6" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="18" x2="20" y2="18" />
+    </svg>
+  );
+}
+
+function AppIcon({ name, url }: { name: string; url?: string | null }) {
+  const [broken, setBroken] = useState(false);
+  if (url && !broken) {
+    return (
+      <img
+        className="app-ic app-ic-img"
+        src={url}
+        alt=""
+        loading="lazy"
+        onError={() => setBroken(true)}
+      />
+    );
+  }
+  const ch = (name.trim()[0] ?? '?').toUpperCase();
+  return <span className="app-ic" aria-hidden="true">{ch}</span>;
+}
+
 function cloneForNew(base: Configuration | null): Configuration {
   if (!base) return { ...NEW_CONFIG_DEFAULTS, name: '', applications: [] } as Configuration;
   const c: Configuration = { ...base, name: `${base.name} copy` };
@@ -387,8 +425,50 @@ function ConfigEditor({
 
   const set = (key: string, value: unknown) => setDraft((d) => ({ ...d, [key]: value }));
 
+  const [view, setView] = useState<'grid' | 'list'>('list');
+  const [filterAction, setFilterAction] = useState<'all' | '1' | '2' | '0'>('all');
+  const [sortBy, setSortBy] = useState<'alphabetical' | 'state' | 'lastUpdate'>('alphabetical');
+
   const allowed: ConfigApp[] = (draft.applications as ConfigApp[] | undefined) ?? [];
   const allowedIds = useMemo(() => new Set(allowed.map((a) => a.id)), [allowed]);
+
+  // Map of application id -> Application for fast lookup (e.g., icons, lastUpdate/versionCode/etc)
+  const appMap = useMemo(() => {
+    const map = new Map<number, Application>();
+    for (const app of apps) {
+      map.set(app.id, app);
+    }
+    return map;
+  }, [apps]);
+
+  const filteredAndSortedAllowed = useMemo(() => {
+    let list = [...allowed];
+    if (filterAction !== 'all') {
+      const targetAction = Number(filterAction);
+      list = list.filter((a) => (a.action ?? 1) === targetAction);
+    }
+
+    list.sort((a, b) => {
+      if (sortBy === 'alphabetical') {
+        const nameA = (a.name ?? a.pkg ?? '').toLowerCase();
+        const nameB = (b.name ?? b.pkg ?? '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      } else if (sortBy === 'state') {
+        const actionA = a.action ?? 1;
+        const actionB = b.action ?? 1;
+        return actionA - actionB;
+      } else if (sortBy === 'lastUpdate') {
+        const appA = appMap.get(a.id);
+        const appB = appMap.get(b.id);
+        const codeA = appA?.versionCode ?? 0;
+        const codeB = appB?.versionCode ?? 0;
+        return codeB - codeA;
+      }
+      return 0;
+    });
+
+    return list;
+  }, [allowed, filterAction, sortBy, appMap]);
 
   function addApps(chosen: Application[]) {
     const entries: ConfigApp[] = chosen.map((app) => ({
@@ -526,37 +606,171 @@ function ConfigEditor({
       })}
 
       <section className="panel cfg-panel">
-        <div className="cfg-sec-h" style={{ display: 'flex', alignItems: 'center' }}>
-          <span>Allowed apps</span>
-          {!readOnly && (
-            <button className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setPickerOpen(true)}>
-              Add apps
-            </button>
-          )}
+        <div className="cfg-sec-h" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span>Allowed apps ({allowed.length})</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div className="toggle" role="group" aria-label="View mode">
+              <button
+                className={view === 'grid' ? 'on' : ''}
+                onClick={() => setView('grid')}
+                aria-label="Grid view"
+                title="Grid"
+                type="button"
+              >
+                <IconGrid />
+              </button>
+              <button
+                className={view === 'list' ? 'on' : ''}
+                onClick={() => setView('list')}
+                aria-label="List view"
+                title="List"
+                type="button"
+              >
+                <IconList />
+              </button>
+            </div>
+            {!readOnly && (
+              <button className="btn btn-sm" onClick={() => setPickerOpen(true)} type="button">
+                Add apps
+              </button>
+            )}
+          </div>
         </div>
         <p className="note" style={{ margin: '0 0 12px' }}>
           Apps this template installs on its devices. Set an app to “Remove” to uninstall it.
         </p>
-        {allowed.length === 0 && <div className="cfg-empty">No apps assigned.</div>}
-        {allowed.map((a) => (
-          <div className="cfg-app" key={a.id}>
-            <span className="cfg-app-nm">{a.name ?? a.pkg ?? `#${a.id}`}</span>
-            <span className="cfg-app-pkg mono">{a.pkg}</span>
+
+        {allowed.length > 0 && (
+          <div className="filters" style={{ margin: '0 0 16px' }}>
+            <span className="label" style={{ alignSelf: 'center' }}>Filter:</span>
+            <button
+              className={`filter-chip ${filterAction === 'all' ? 'on' : ''}`}
+              onClick={() => setFilterAction('all')}
+              type="button"
+            >
+              All
+            </button>
+            <button
+              className={`filter-chip ${filterAction === '1' ? 'on' : ''}`}
+              onClick={() => setFilterAction('1')}
+              type="button"
+            >
+              Install
+            </button>
+            <button
+              className={`filter-chip ${filterAction === '2' ? 'on' : ''}`}
+              onClick={() => setFilterAction('2')}
+              type="button"
+            >
+              Remove
+            </button>
+            <button
+              className={`filter-chip ${filterAction === '0' ? 'on' : ''}`}
+              onClick={() => setFilterAction('0')}
+              type="button"
+            >
+              Hide icon
+            </button>
+
+            <div className="filter-div" />
+
+            <span className="label" style={{ alignSelf: 'center' }}>Sort:</span>
             <select
               className="sel"
-              value={a.action ?? 1}
-              disabled={readOnly}
-              onChange={(e) => setAppAction(a.id, Number(e.target.value))}
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'alphabetical' | 'state' | 'lastUpdate')}
             >
-              <option value={1}>Install</option>
-              <option value={2}>Remove</option>
-              <option value={0}>Hide icon</option>
+              <option value="alphabetical">Alphabetical</option>
+              <option value="state">State</option>
+              <option value="lastUpdate">Last update</option>
             </select>
-            {!readOnly && (
-              <button className="btn btn-sm btn-ghost" onClick={() => removeApp(a.id)} aria-label="Remove app">✕</button>
-            )}
           </div>
-        ))}
+        )}
+
+        {allowed.length === 0 ? (
+          <div className="cfg-empty">No apps assigned.</div>
+        ) : filteredAndSortedAllowed.length === 0 ? (
+          <div className="cfg-empty">No apps match the selected filter.</div>
+        ) : view === 'grid' ? (
+          <div className="app-grid">
+            {filteredAndSortedAllowed.map((a) => {
+              const appInfo = appMap.get(a.id);
+              const iconUrl = appInfo?.icon;
+              const displayName = a.name ?? appInfo?.name ?? a.pkg ?? `#${a.id}`;
+              return (
+                <div className="app-card" key={a.id}>
+                  <div className="app-top">
+                    <AppIcon name={displayName} url={iconUrl} />
+                    <div className="app-meta">
+                      <div className="app-nm">{displayName}</div>
+                      <div className="app-pkg mono">{a.pkg}</div>
+                    </div>
+                  </div>
+                  <div className="app-foot" style={{ gap: 8 }}>
+                    <select
+                      className="sel"
+                      value={a.action ?? 1}
+                      disabled={readOnly}
+                      onChange={(e) => setAppAction(a.id, Number(e.target.value))}
+                      style={{ flex: 1 }}
+                    >
+                      <option value={1}>Install</option>
+                      <option value={2}>Remove</option>
+                      <option value={0}>Hide icon</option>
+                    </select>
+                    {!readOnly && (
+                      <button
+                        className="btn btn-sm btn-danger"
+                        onClick={() => removeApp(a.id)}
+                        aria-label="Delete app"
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div>
+            {filteredAndSortedAllowed.map((a) => {
+              const appInfo = appMap.get(a.id);
+              const iconUrl = appInfo?.icon;
+              const displayName = a.name ?? appInfo?.name ?? a.pkg ?? `#${a.id}`;
+              return (
+                <div className="cfg-app" key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <AppIcon name={displayName} url={iconUrl} />
+                  <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <span className="cfg-app-nm">{displayName}</span>
+                    <span className="cfg-app-pkg mono">{a.pkg}</span>
+                  </div>
+                  <select
+                    className="sel"
+                    value={a.action ?? 1}
+                    disabled={readOnly}
+                    onChange={(e) => setAppAction(a.id, Number(e.target.value))}
+                  >
+                    <option value={1}>Install</option>
+                    <option value={2}>Remove</option>
+                    <option value={0}>Hide icon</option>
+                  </select>
+                  {!readOnly && (
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => removeApp(a.id)}
+                      aria-label="Remove app"
+                      type="button"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <button className="cfg-adv-toggle" onClick={() => setAdvanced((v) => !v)}>
