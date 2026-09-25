@@ -122,11 +122,58 @@ export interface UploadedFileView {
   fileName?: string;
 }
 
-/** Upload an APK; the server parses it and returns its package/version details. */
-export async function uploadApk(file: File): Promise<FileUploadResult> {
-  const form = new FormData();
-  form.append('file', file, file.name);
-  return apiClient.postForm<FileUploadResult>('/private/web-ui-files', form);
+/** Chunk size for uploading large files in smaller parts (10MB). */
+const CHUNK_SIZE = 10 * 1024 * 1024;
+
+export interface UploadChunkOptions {
+  onProgress?: (percent: number) => void;
+}
+
+/**
+ * Helper to upload a file in chunks to avoid request size limits (e.g. Cloudflare 100MB limit).
+ * Uploads chunks sequentially, then requests assembly on the server.
+ */
+export async function uploadFileInChunks<T>(
+  file: File,
+  isBundle: boolean,
+  parseFile = true,
+  options?: UploadChunkOptions,
+): Promise<T> {
+  const totalSize = file.size;
+  const totalChunks = Math.ceil(totalSize / CHUNK_SIZE);
+  const uploadId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, totalSize);
+    const chunkBlob = file.slice(start, end);
+
+    const form = new FormData();
+    form.append('uploadId', uploadId);
+    form.append('chunkIndex', String(i));
+    form.append('totalChunks', String(totalChunks));
+    form.append('file', chunkBlob, file.name);
+
+    await apiClient.postForm<void>('/private/web-ui-files/chunk', form);
+
+    if (options?.onProgress) {
+      const progress = Math.round(((i + 1) / totalChunks) * 100);
+      options.onProgress(progress);
+    }
+  }
+
+  // Request server to reassemble chunks
+  return apiClient.post<T>('/private/web-ui-files/chunk/assemble', {
+    uploadId,
+    fileName: file.name,
+    isBundle,
+    parseFile,
+  });
+}
+
+/** Upload an APK; the server parses it and returns its package/version details. Uses chunked upload. */
+export async function uploadApk(file: File, options?: UploadChunkOptions): Promise<FileUploadResult> {
+  return uploadFileInChunks<FileUploadResult>(file, false, true, options);
 }
 
 // --- Split-APK bundle upload (.xapk/.apks/.apkm/.zip) ------------------------
@@ -141,11 +188,9 @@ export interface BundleUploadResult {
   parts: { url: string; sha256: string; name: string }[];
 }
 
-/** Upload a split-APK bundle; the server unpacks it and returns the hosted parts. */
-export async function uploadBundle(file: File): Promise<BundleUploadResult> {
-  const form = new FormData();
-  form.append('file', file, file.name);
-  return apiClient.postForm<BundleUploadResult>('/private/web-ui-files/bundle', form);
+/** Upload a split-APK bundle; the server unpacks it and returns the hosted parts. Uses chunked upload. */
+export async function uploadBundle(file: File, options?: UploadChunkOptions): Promise<BundleUploadResult> {
+  return uploadFileInChunks<BundleUploadResult>(file, true, false, options);
 }
 
 /** Commit a just-uploaded temp file into the served files area; returns its url. */
