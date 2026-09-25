@@ -67,7 +67,13 @@ import com.mdmesh.oem.OemAdapter
 import com.mdmesh.policy.CapabilityRegistry
 import com.mdmesh.policy.TogglePolicy
 import com.mdmesh.policy.wifi.DpmHandle
+import com.mdmesh.core.command.handlers.RemoteStartSessionHandler
+import com.mdmesh.core.command.handlers.RemoteStopSessionHandler
+import com.mdmesh.core.net.MdmApi
+import com.mdmesh.core.store.DeviceIdentity
+import com.mdmesh.remote.RemoteControlSession
 import com.mdmesh.remote.RemoteControlTierDetector
+import com.mdmesh.remote.WebRtcRemoteControlSession
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -111,10 +117,8 @@ object AgentModule {
     @Provides
     @Singleton
     fun provideRemoteTierDetector(): RemoteControlTierDetector =
-        // MediaProjection + accessibility probes land with :remote's real impl;
-        // until then advertise tier=none honestly.
         RemoteControlTierDetector(
-            screenCaptureAvailable = false,
+            screenCaptureAvailable = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP,
             inputInjectionAvailable = false,
         )
 
@@ -322,6 +326,35 @@ object AgentModule {
     @IntoSet
     fun provideLocationModeHandler(store: LocationModeStore): CommandHandler =
         DeviceLocationModeHandler(store)
+
+    @Provides
+    @Singleton
+    fun provideRemoteControlSession(
+        @ApplicationContext context: Context,
+        identity: DeviceIdentity,
+        api: MdmApi,
+    ): RemoteControlSession = WebRtcRemoteControlSession(
+        context = context,
+        sendSignal = { dto ->
+            val secret = identity.secret() ?: return@WebRtcRemoteControlSession
+            runCatching { api.sendRemoteSignal("Bearer $secret", dto.sessionId, dto) }
+        },
+        fetchSignals = {
+            val secret = identity.secret() ?: return@WebRtcRemoteControlSession emptyList()
+            val result = runCatching { api.getRemoteSignals("Bearer $secret", "active") }.getOrNull()
+            result?.data ?: emptyList()
+        }
+    )
+
+    @Provides
+    @IntoSet
+    fun provideRemoteStartSessionHandler(session: RemoteControlSession): CommandHandler =
+        RemoteStartSessionHandler(session)
+
+    @Provides
+    @IntoSet
+    fun provideRemoteStopSessionHandler(session: RemoteControlSession): CommandHandler =
+        RemoteStopSessionHandler(session)
 
     // --- Desired-state configuration (config.apply) ---
 
