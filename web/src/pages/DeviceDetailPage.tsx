@@ -311,9 +311,44 @@ export function DeviceDetailPage() {
     { k: 'Local IP', v: orDash(teleStr(dyn.localIp) ?? teleStr(hw.localIp)), mono: true },
     { k: 'Public IP', v: orDash(teleStr((tele as Record<string, unknown> | null)?.publicIp) ?? device.publicIp), mono: true },
   ];
+  const agentVer = orDash(ds?.agentVersion ?? device.launcherVersion);
+  const apkAvail = updateStatus?.apk?.available;
+  const targetVer = updateStatus?.apk?.version;
+
   const managementRows: Row[] = [
     { k: 'Config', v: configName },
-    { k: 'Agent', v: orDash(ds?.agentVersion ?? device.launcherVersion) },
+    {
+      k: 'Agent',
+      v: (
+        <span>
+          {agentVer}
+          {apkAvail && targetVer && (
+            <span style={{ display: 'block', fontSize: '12px', marginTop: '2px' }}>
+              <span className="muted">New version available </span>
+              <button
+                type="button"
+                className="pri"
+                style={{
+                  padding: '1px 6px',
+                  fontSize: '11px',
+                  lineHeight: '1.2',
+                  display: 'inline-block',
+                  verticalAlign: 'baseline',
+                  marginLeft: '4px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+                disabled={busy}
+                onClick={() => void updateAgent()}
+                title={`Update agent to v${targetVer}`}
+              >
+                [{targetVer}]
+              </button>
+            </span>
+          )}
+        </span>
+      ),
+    },
     { k: 'MDM mode', v: onOff(sec.isDeviceOwner, device.mdmMode) },
     { k: 'Enrolled', v: fmtDateTime(device.enrollTime) },
   ];
@@ -381,11 +416,6 @@ export function DeviceDetailPage() {
             <button className="sec" disabled={busy} onClick={() => void installConfigApps()}>
               Install config apps
             </button>
-            {updateStatus?.apk?.available && (
-              <button className="sec" disabled={busy} onClick={() => void updateAgent()}>
-                Update agent (v{updateStatus.apk.version})
-              </button>
-            )}
           </div>
 
           {groups.map((g) => (
