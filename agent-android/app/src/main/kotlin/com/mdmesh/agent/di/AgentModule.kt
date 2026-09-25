@@ -339,9 +339,9 @@ object AgentModule {
             val secret = identity.secret() ?: return@WebRtcRemoteControlSession
             runCatching { api.sendRemoteSignal("Bearer $secret", dto.sessionId, dto) }
         },
-        fetchSignals = {
+        fetchSignals = { sessionId ->
             val secret = identity.secret() ?: return@WebRtcRemoteControlSession emptyList()
-            val result = runCatching { api.getRemoteSignals("Bearer $secret", "active") }.getOrNull()
+            val result = runCatching { api.getRemoteSignals("Bearer $secret", sessionId) }.getOrNull()
             result?.data ?: emptyList()
         }
     )

@@ -3,6 +3,7 @@ package com.mdmesh.remote
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjection
+import android.util.Log
 import com.mdmesh.proto.IceCandidateDto
 import com.mdmesh.proto.RemoteSignalDto
 import kotlinx.coroutines.CoroutineScope
@@ -28,13 +29,15 @@ import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.util.concurrent.atomic.AtomicBoolean
 
+private const val TAG = "WebRtcRemoteControlSession"
+
 /**
  * Live screen-viewing [RemoteControlSession] powered by WebRTC and MediaProjection.
  */
 class WebRtcRemoteControlSession(
     private val context: Context,
     private val sendSignal: (suspend (RemoteSignalDto) -> Unit)? = null,
-    private val fetchSignals: (suspend () -> List<RemoteSignalDto>)? = null,
+    private val fetchSignals: (suspend (String) -> List<RemoteSignalDto>)? = null,
     private val mediaProjectionData: Intent? = null,
 ) : RemoteControlSession {
 
@@ -51,6 +54,7 @@ class WebRtcRemoteControlSession(
     private var videoTrack: VideoTrack? = null
 
     override suspend fun start(sessionId: String, mode: RemoteControlSession.Mode): Result<Unit> {
+        Log.d(TAG, "Starting WebRTC remote session: $sessionId with mode: $mode")
         if (isRunning.getAndSet(true)) {
             if (activeSessionId == sessionId) return Result.success(Unit)
             stop(activeSessionId ?: "")
@@ -60,13 +64,16 @@ class WebRtcRemoteControlSession(
         return runCatching {
             initWebRtcAndStartCapture(sessionId)
             startSignalingLoop(sessionId)
+            Log.d(TAG, "Successfully started WebRTC remote session: $sessionId")
             Unit
-        }.onFailure {
+        }.onFailure { e ->
+            Log.e(TAG, "Failed to start WebRTC remote session: $sessionId", e)
             stop(sessionId)
         }
     }
 
     override suspend fun stop(sessionId: String): Result<Unit> {
+        Log.d(TAG, "Stopping WebRTC remote session: $sessionId")
         if (activeSessionId != null && activeSessionId != sessionId) {
             return Result.success(Unit)
         }
@@ -77,12 +84,14 @@ class WebRtcRemoteControlSession(
         signalingJob = null
 
         cleanupWebRtc()
+        Log.d(TAG, "WebRTC remote session stopped: $sessionId")
         return Result.success(Unit)
     }
 
     override fun isActive(): Boolean = isRunning.get() && activeSessionId != null
 
     private fun initWebRtcAndStartCapture(sessionId: String) {
+        Log.d(TAG, "Initializing PeerConnectionFactory and PeerConnection for session: $sessionId")
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context)
                 .setEnableInternalTracer(false)
@@ -100,6 +109,7 @@ class WebRtcRemoteControlSession(
 
         val observer = object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: IceCandidate) {
+                Log.d(TAG, "Local ICE candidate gathered for session $sessionId: ${candidate.sdpMid}")
                 scope.launch {
                     val dto = RemoteSignalDto(
                         sessionId = sessionId,
@@ -110,14 +120,25 @@ class WebRtcRemoteControlSession(
                             sdpMLineIndex = candidate.sdpMLineIndex
                         )
                     )
-                    runCatching { sendSignal?.invoke(dto) }
+                    runCatching {
+                        sendSignal?.invoke(dto)
+                        Log.d(TAG, "Sent local ICE candidate to server for session: $sessionId")
+                    }.onFailure { e ->
+                        Log.e(TAG, "Failed to send local ICE candidate for session: $sessionId", e)
+                    }
                 }
             }
 
-            override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
+            override fun onSignalingChange(state: PeerConnection.SignalingState?) {
+                Log.d(TAG, "Signaling state changed for session $sessionId: $state")
+            }
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                Log.d(TAG, "ICE connection state changed for session $sessionId: $state")
+            }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
-            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
+            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
+                Log.d(TAG, "ICE gathering state changed for session $sessionId: $state")
+            }
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
             override fun onAddStream(stream: MediaStream?) {}
             override fun onRemoveStream(stream: MediaStream?) {}
@@ -131,9 +152,11 @@ class WebRtcRemoteControlSession(
 
         val intentData = mediaProjectionData ?: MediaProjectionDataStore.projectionData
         if (intentData != null) {
+            Log.d(TAG, "Starting ScreenCaptureService and MediaProjection for session: $sessionId")
             ScreenCaptureService.startService(context)
             val screenCapturer = ScreenCapturerAndroid(intentData, object : MediaProjection.Callback() {
                 override fun onStop() {
+                    Log.w(TAG, "MediaProjection stopped by system/user for session: $sessionId")
                     scope.launch { stop(sessionId) }
                 }
             })
@@ -147,6 +170,7 @@ class WebRtcRemoteControlSession(
                 }
             }
         } else {
+            Log.w(TAG, "No MediaProjection data found; prompting consent activity for session: $sessionId")
             // Prompt for MediaProjection capture consent via Activity
             val promptIntent = Intent(context, ScreenCapturePermissionActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -169,37 +193,57 @@ class WebRtcRemoteControlSession(
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
         }
 
+        Log.d(TAG, "Creating WebRTC SDP offer for session: $sessionId")
         peerConnection?.createOffer(object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription?) {
                 val localSdp = sdp ?: return
+                Log.d(TAG, "WebRTC offer created successfully for session: $sessionId")
                 peerConnection?.setLocalDescription(object : SdpObserver {
                     override fun onCreateSuccess(p0: SessionDescription?) {}
                     override fun onSetSuccess() {
+                        Log.d(TAG, "Local description set successfully for session: $sessionId")
                         scope.launch {
                             val offerDto = RemoteSignalDto(
                                 sessionId = sessionId,
                                 type = "offer",
                                 sdp = localSdp.description
                             )
-                            runCatching { sendSignal?.invoke(offerDto) }
+                            runCatching {
+                                sendSignal?.invoke(offerDto)
+                                Log.d(TAG, "WebRTC offer sent to server for session: $sessionId")
+                            }.onFailure { e ->
+                                Log.e(TAG, "Failed to send WebRTC offer to server for session: $sessionId", e)
+                            }
                         }
                     }
-                    override fun onCreateFailure(p0: String?) {}
-                    override fun onSetFailure(p0: String?) {}
+                    override fun onCreateFailure(p0: String?) {
+                        Log.e(TAG, "Failed to set local SDP description for session $sessionId: $p0")
+                    }
+                    override fun onSetFailure(p0: String?) {
+                        Log.e(TAG, "Failed to set local SDP description for session $sessionId: $p0")
+                    }
                 }, localSdp)
             }
             override fun onSetSuccess() {}
-            override fun onCreateFailure(p0: String?) {}
-            override fun onSetFailure(p0: String?) {}
+            override fun onCreateFailure(p0: String?) {
+                Log.e(TAG, "Failed to create WebRTC SDP offer for session $sessionId: $p0")
+            }
+            override fun onSetFailure(p0: String?) {
+                Log.e(TAG, "Failed to create WebRTC SDP offer for session $sessionId: $p0")
+            }
         }, mediaConstraints)
     }
 
     private fun startSignalingLoop(sessionId: String) {
         val getter = fetchSignals ?: return
+        Log.d(TAG, "Starting signaling loop for session: $sessionId")
         signalingJob = scope.launch {
             while (isActive && isRunning.get()) {
-                val signals = runCatching { getter() }.getOrNull()
-                if (signals != null) {
+                val signals = runCatching { getter(sessionId) }
+                    .onFailure { e -> Log.e(TAG, "Error polling signals for session $sessionId: ${e.message}", e) }
+                    .getOrNull()
+                if (signals != null && signals.isNotEmpty()) {
+                    Log.d(TAG, "Fetched ${signals.size} signal(s) for session: $sessionId")
                     for (sig in signals) {
                         handleIncomingSignal(sig)
                     }
@@ -210,29 +254,40 @@ class WebRtcRemoteControlSession(
     }
 
     private fun handleIncomingSignal(signal: RemoteSignalDto) {
+        Log.d(TAG, "Handling incoming signal '${signal.type}' for session: ${signal.sessionId}")
         when (signal.type) {
             "answer" -> {
                 val sdpStr = signal.sdp ?: return
+                Log.d(TAG, "Setting remote SDP answer for session: ${signal.sessionId}")
                 val remoteSdp = SessionDescription(SessionDescription.Type.ANSWER, sdpStr)
                 peerConnection?.setRemoteDescription(object : SdpObserver {
                     override fun onCreateSuccess(p0: SessionDescription?) {}
-                    override fun onSetSuccess() {}
-                    override fun onCreateFailure(p0: String?) {}
-                    override fun onSetFailure(p0: String?) {}
+                    override fun onSetSuccess() {
+                        Log.d(TAG, "Remote SDP answer set successfully for session: ${signal.sessionId}")
+                    }
+                    override fun onCreateFailure(p0: String?) {
+                        Log.e(TAG, "Failed to set remote SDP answer for session ${signal.sessionId}: $p0")
+                    }
+                    override fun onSetFailure(p0: String?) {
+                        Log.e(TAG, "Failed to set remote SDP answer for session ${signal.sessionId}: $p0")
+                    }
                 }, remoteSdp)
             }
             "iceCandidate" -> {
                 val cand = signal.candidate ?: return
+                Log.d(TAG, "Adding remote ICE candidate for session: ${signal.sessionId}")
                 val iceCandidate = IceCandidate(cand.sdpMid, cand.sdpMLineIndex, cand.candidate)
                 peerConnection?.addIceCandidate(iceCandidate)
             }
             "stop" -> {
+                Log.d(TAG, "Received stop signal for session: ${signal.sessionId}")
                 scope.launch { stop(signal.sessionId) }
             }
         }
     }
 
     private fun cleanupWebRtc() {
+        Log.d(TAG, "Cleaning up WebRTC resources")
         runCatching { ScreenCaptureService.stopService(context) }
         runCatching { capturer?.stopCapture() }
         runCatching { capturer?.dispose() }
