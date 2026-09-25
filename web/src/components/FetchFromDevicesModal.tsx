@@ -103,7 +103,7 @@ export function FetchFromDevicesModal({ onClose, onDone }: FetchFromDevicesModal
       setProgressText(`Scanning device ${i + 1} of ${targetDevices.length}: ${dev.number}…`);
 
       try {
-        const apps = await scanApps(dev.id, controller.signal);
+        const apps = await scanApps(dev.number, controller.signal);
         for (const app of apps) {
           if (!app.pkg) continue;
           const existingScanned = scannedAppsMap.get(app.pkg);
