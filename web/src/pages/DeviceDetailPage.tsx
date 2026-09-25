@@ -12,8 +12,9 @@ import { LocationPanel } from '../components/LocationPanel';
 import { ConfigStatusCard } from '../components/ConfigStatusCard';
 import { getTelemetry, type TelemetrySnapshot } from '../api/telemetry';
 import { getConfigStatus, type ConfigStatus } from '../api/configSync';
+import { getUpdateStatus, type UpdateStatus } from '../api/updates';
 import {
-  getDeviceState, forceSync, queueCommand, syncConfigApps, type DeviceState,
+  getDeviceState, forceSync, queueCommand, syncConfigApps, installApp, type DeviceState,
 } from '../api/commands';
 import { ApiError } from '../api/client';
 import { isOnline as isOnlineByRecency } from '../ui/status';
@@ -125,6 +126,7 @@ export function DeviceDetailPage() {
   const [tele, setTele] = useState<TelemetrySnapshot | null>(null);
   const [ds, setDs] = useState<DeviceState | null>(null);
   const [cfgStatus, setCfgStatus] = useState<ConfigStatus | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [tab, setTab] = useState<Tab>('control');
   const [busy, setBusy] = useState(false);
 
@@ -169,6 +171,7 @@ export function DeviceDetailPage() {
         getTelemetry(device.number).then((v) => { if (on) setTele(v); }).catch(() => undefined),
         getDeviceState(device.number).then((v) => { if (on) setDs(v); }).catch(() => undefined),
         getConfigStatus(device.number).then((v) => { if (on) setCfgStatus(v); }).catch(() => undefined),
+        getUpdateStatus().then((v) => { if (on) setUpdateStatus(v); }).catch(() => undefined),
       ]);
       if (!on) return;
       t = setTimeout(() => void poll(), 5000);
@@ -201,6 +204,29 @@ export function DeviceDetailPage() {
       toast.push('ok', 'Sync requested', '');
     } catch (e) {
       toast.push('err', 'Sync failed', e instanceof Error ? e.message : '');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateAgent() {
+    if (!device || !updateStatus?.apk?.available) return;
+    const apk = updateStatus.apk;
+    const pkg = (import.meta.env.VITE_AGENT_PACKAGE as string) || 'com.mdmesh.agent';
+    setBusy(true);
+    try {
+      const url = `${window.location.origin}/update/agent.apk?v=${apk.versionCode}`;
+      await installApp(device.number, {
+        url,
+        packageName: pkg,
+        versionCode: apk.versionCode,
+        sha256: apk.sha256,
+        runAfterInstall: false,
+      });
+      await forceSync(device.number).catch(() => undefined);
+      toast.push('ok', 'Agent update queued', `Updating agent to v${apk.version}`);
+    } catch (e) {
+      toast.push('err', 'Agent update failed', e instanceof Error ? e.message : '');
     } finally {
       setBusy(false);
     }
@@ -285,9 +311,44 @@ export function DeviceDetailPage() {
     { k: 'Local IP', v: orDash(teleStr(dyn.localIp) ?? teleStr(hw.localIp)), mono: true },
     { k: 'Public IP', v: orDash(teleStr((tele as Record<string, unknown> | null)?.publicIp) ?? device.publicIp), mono: true },
   ];
+  const agentVer = orDash(ds?.agentVersion ?? device.launcherVersion);
+  const apkAvail = updateStatus?.apk?.available;
+  const targetVer = updateStatus?.apk?.version;
+
   const managementRows: Row[] = [
     { k: 'Config', v: configName },
-    { k: 'Agent', v: orDash(ds?.agentVersion ?? device.launcherVersion) },
+    {
+      k: 'Agent',
+      v: (
+        <span>
+          {agentVer}
+          {apkAvail && targetVer && (
+            <span style={{ display: 'block', fontSize: '12px', marginTop: '2px' }}>
+              <span className="muted">New version available </span>
+              <button
+                type="button"
+                className="pri"
+                style={{
+                  padding: '1px 6px',
+                  fontSize: '11px',
+                  lineHeight: '1.2',
+                  display: 'inline-block',
+                  verticalAlign: 'baseline',
+                  marginLeft: '4px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+                disabled={busy}
+                onClick={() => void updateAgent()}
+                title={`Update agent to v${targetVer}`}
+              >
+                [{targetVer}]
+              </button>
+            </span>
+          )}
+        </span>
+      ),
+    },
     { k: 'MDM mode', v: onOff(sec.isDeviceOwner, device.mdmMode) },
     { k: 'Enrolled', v: fmtDateTime(device.enrollTime) },
   ];
