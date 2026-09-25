@@ -482,6 +482,7 @@ function CustomSource({ onDeploy }: { onDeploy: (s: DeploySubject) => void }) {
   const [savedAppId, setSavedAppId] = useState<number | undefined>(undefined);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [dropped, setDropped] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -497,9 +498,10 @@ function CustomSource({ onDeploy }: { onDeploy: (s: DeploySubject) => void }) {
     }
     setBundle(null);
     setUploading(true);
+    setUploadProgress(0);
     setDropped(file.name);
     try {
-      const up = await uploadApk(file);
+      const up = await uploadApk(file, { onProgress: setUploadProgress });
       const fd = up.fileDetails;
       if (fd) {
         if (fd.name) setName(fd.name);
@@ -549,6 +551,7 @@ function CustomSource({ onDeploy }: { onDeploy: (s: DeploySubject) => void }) {
       setDropped(null);
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -556,9 +559,10 @@ function CustomSource({ onDeploy }: { onDeploy: (s: DeploySubject) => void }) {
   // There's no single URL, so we hold the parts and deploy them together.
   async function onBundle(file: File) {
     setUploading(true);
+    setUploadProgress(0);
     setDropped(file.name);
     try {
-      const b = await uploadBundle(file);
+      const b = await uploadBundle(file, { onProgress: setUploadProgress });
       setBundle(b);
       setUrl('');
       setSha('');
@@ -597,6 +601,7 @@ function CustomSource({ onDeploy }: { onDeploy: (s: DeploySubject) => void }) {
       setDropped(null);
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -714,7 +719,10 @@ function CustomSource({ onDeploy }: { onDeploy: (s: DeploySubject) => void }) {
             }}
           />
           {uploading ? (
-            <span className="dz-main"><span className="spin" /> Analyzing {dropped}…</span>
+            <span className="dz-main">
+              <span className="spin" /> Uploading {dropped}…
+              {uploadProgress !== null && ` (${uploadProgress}%)`}
+            </span>
           ) : dropped ? (
             <span className="dz-main">
               ✓ {dropped}

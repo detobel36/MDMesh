@@ -503,6 +503,128 @@ public class FilesResource {
     }
 
     // =================================================================================================================
+    @ApiOperation(
+            value = "Upload chunk",
+            notes = "Uploads a chunk of a large file"
+    )
+    @POST
+    @Path("/chunk")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response uploadChunk(@FormDataParam("file") InputStream uploadedInputStream,
+                                @FormDataParam("uploadId") String uploadId,
+                                @FormDataParam("chunkIndex") Integer chunkIndex,
+                                @FormDataParam("totalChunks") Integer totalChunks) {
+        if (!SecurityContext.get().hasPermission("edit_files")) {
+            logger.error("Unauthorized attempt to upload a file chunk by user " +
+                    SecurityContext.get().getCurrentUserName());
+            return Response.PERMISSION_DENIED();
+        }
+
+        if (uploadId == null || uploadId.trim().isEmpty() || chunkIndex == null) {
+            return Response.ERROR("error.chunk.invalid");
+        }
+        String safeUploadId = uploadId.replaceAll("[^a-zA-Z0-9_-]", "");
+        if (safeUploadId.isEmpty()) {
+            return Response.ERROR("error.chunk.invalid");
+        }
+
+        try {
+            File chunkDir = new File(System.getProperty("java.io.tmpdir"), "hmdm_chunks/" + safeUploadId);
+            if (!chunkDir.exists()) {
+                chunkDir.mkdirs();
+            }
+            File chunkFile = new File(chunkDir, "chunk_" + chunkIndex);
+            FileUtil.writeToFile(uploadedInputStream, chunkFile.getAbsolutePath());
+            return Response.OK();
+        } catch (Exception e) {
+            logger.error("Unexpected error when saving chunk " + chunkIndex + " for uploadId " + uploadId, e);
+            return Response.ERROR();
+        }
+    }
+
+    // =================================================================================================================
+    @ApiOperation(
+            value = "Assemble chunks",
+            notes = "Reassembles all uploaded chunks for a file and processes it"
+    )
+    @POST
+    @Path("/chunk/assemble")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response assembleChunks(AssembleChunkRequest request) {
+        if (!SecurityContext.get().hasPermission("edit_files")) {
+            logger.error("Unauthorized attempt to assemble chunks by user " +
+                    SecurityContext.get().getCurrentUserName());
+            return Response.PERMISSION_DENIED();
+        }
+
+        if (request == null || request.getUploadId() == null || request.getUploadId().trim().isEmpty()) {
+            return Response.ERROR("error.chunk.invalid");
+        }
+        String safeUploadId = request.getUploadId().replaceAll("[^a-zA-Z0-9_-]", "");
+        if (safeUploadId.isEmpty()) {
+            return Response.ERROR("error.chunk.invalid");
+        }
+
+        File chunkDir = new File(System.getProperty("java.io.tmpdir"), "hmdm_chunks/" + safeUploadId);
+        if (!chunkDir.exists() || !chunkDir.isDirectory()) {
+            return Response.ERROR("error.chunk.notfound");
+        }
+
+        File[] chunkFiles = chunkDir.listFiles((dir, name) -> name.startsWith("chunk_"));
+        if (chunkFiles == null || chunkFiles.length == 0) {
+            return Response.ERROR("error.chunk.notfound");
+        }
+
+        int totalChunks = chunkFiles.length;
+
+        String fileName = request.getFileName();
+        if (fileName == null || fileName.trim().isEmpty()) {
+            fileName = "uploaded_file";
+        }
+        String adjustedFileName = FileUtil.adjustFileName(fileName);
+        File assembledFile = null;
+
+        try {
+            assembledFile = FileUtil.createTempFile(adjustedFileName);
+            try (java.io.OutputStream out = new java.io.BufferedOutputStream(new java.io.FileOutputStream(assembledFile, true))) {
+                for (int i = 0; i < totalChunks; i++) {
+                    File chunkFile = new File(chunkDir, "chunk_" + i);
+                    if (!chunkFile.exists()) {
+                        out.close();
+                        assembledFile.delete();
+                        return Response.ERROR("error.chunk.missing");
+                    }
+                    try (InputStream in = new java.io.BufferedInputStream(new FileInputStream(chunkFile))) {
+                        IOUtils.copy(in, out);
+                    }
+                }
+                out.flush();
+            }
+
+            // Cleanup chunk directory
+            FileUtils.deleteDirectory(chunkDir);
+
+            if (request.isBundle()) {
+                return processUploadedBundle(assembledFile, fileName);
+            } else {
+                return processUploadedFile(assembledFile, fileName, request.isParseFile());
+            }
+
+        } catch (Exception e) {
+            logger.error("Unexpected error reassembling chunks for uploadId " + safeUploadId, e);
+            if (assembledFile != null && assembledFile.exists()) {
+                assembledFile.delete();
+            }
+            try {
+                FileUtils.deleteDirectory(chunkDir);
+            } catch (IOException ignored) {}
+            return Response.ERROR();
+        }
+    }
+
+    // =================================================================================================================
     private Response uploadFilesInternal(InputStream uploadedInputStream,
                                          FormDataContentDisposition fileDetail,
                                          boolean parseFile) throws Exception {
@@ -520,10 +642,19 @@ public class FilesResource {
             File uploadFile = FileUtil.createTempFile(adjustedFileName);
             FileUtil.writeToFile(uploadedInputStream, uploadFile.getAbsolutePath());
 
+            return processUploadedFile(uploadFile, fileName, parseFile);
+        } catch (Exception e) {
+            logger.error("Unexpected error when handling file upload", e);
+            return Response.ERROR();
+        }
+    }
+
+    private Response processUploadedFile(File uploadFile, String fileName, boolean parseFile) {
+        try {
             FileUploadResult result = new FileUploadResult();
             result.setName(fileName);
 
-            if (!unsecureDAO.isSingleCustomer()) {
+            if (unsecureDAO != null && !unsecureDAO.isSingleCustomer()) {
                 // Check the disk size in multi-tenant mode
                 Customer currentCustomer = customerDAO.findById(SecurityContext.get().getCurrentCustomerId().get());
                 if (!currentCustomer.isMaster() && currentCustomer.getSizeLimit() > 0) {
@@ -620,15 +751,23 @@ public class FilesResource {
                     SecurityContext.get().getCurrentUserName());
             return Response.PERMISSION_DENIED();
         }
-        File bundleTmp = null;
-        List<File> partTmps = new LinkedList<>();
         try {
             String fileName = new String(fileDetail.getFileName().getBytes(StandardCharsets.ISO_8859_1),
                     StandardCharsets.UTF_8);
-            String lower = fileName.toLowerCase();
-            bundleTmp = FileUtil.createTempFile(FileUtil.adjustFileName(fileName));
+            File bundleTmp = FileUtil.createTempFile(FileUtil.adjustFileName(fileName));
             FileUtil.writeToFile(uploadedInputStream, bundleTmp.getAbsolutePath());
 
+            return processUploadedBundle(bundleTmp, fileName);
+        } catch (Exception e) {
+            logger.error("Unexpected error unpacking bundle", e);
+            return Response.ERROR("error.bundle.unpack");
+        }
+    }
+
+    private Response processUploadedBundle(File bundleTmp, String fileName) {
+        List<File> partTmps = new LinkedList<>();
+        try {
+            String lower = fileName.toLowerCase();
             // Extract the APK parts. A bare .apk is a one-part install; anything else is treated as a
             // zip container (.xapk/.apks/.apkm/.zip) and every *.apk entry becomes a part.
             if (lower.endsWith(".apk")) {
