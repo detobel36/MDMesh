@@ -66,7 +66,6 @@ public class ConfigurationResource {
     private com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller;
     private UploadedFileDAO uploadedFileDAO;
     private String filesDirectory;
-    private com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller;
     private String baseUrl;
 
     /**
@@ -84,7 +83,6 @@ public class ConfigurationResource {
                                  com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller,
                                  UploadedFileDAO uploadedFileDAO,
                                  @Named("files.directory") String filesDirectory,
-                                 com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller,
                                  @Named("base.url") String baseUrl) {
         this.configurationDAO = configurationDAO;
         this.applicationDAO = applicationDAO;
@@ -94,7 +92,6 @@ public class ConfigurationResource {
         this.configAppInstaller = configAppInstaller;
         this.uploadedFileDAO = uploadedFileDAO;
         this.filesDirectory = filesDirectory;
-        this.configAppInstaller = configAppInstaller;
         this.baseUrl = baseUrl;
     }
     // =================================================================================================================

@@ -102,6 +102,7 @@ public final class DesiredConfigBuilder {
         k.setPassword(cfg.getPassword());
         DesiredKioskTheme t = new DesiredKioskTheme();
         t.setBackgroundColor(cfg.getBackgroundColor()); t.setTextColor(cfg.getTextColor());
+        t.setBackgroundImageUrl(cfg.getBackgroundImageUrl());
         t.setIconSize(cfg.getIconSize() == null ? null : cfg.getIconSize().name());
         k.setTheme(t);
         return k;

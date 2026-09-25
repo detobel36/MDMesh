@@ -40,5 +40,6 @@ data class KioskFeaturesDto(
 data class KioskThemeDto(
     val backgroundColor: String? = null,
     val textColor: String? = null,
+    val backgroundImageUrl: String? = null,
     val iconSize: String? = null,
 )

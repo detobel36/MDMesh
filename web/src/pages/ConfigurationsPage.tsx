@@ -46,7 +46,7 @@ const NEW_CONFIG_DEFAULTS: Partial<Configuration> = {
   iconSize: 'SMALL',
   defaultFilePath: '/',
   systemUpdateType: 0,
-  useDefaultDesignSettings: true,
+  useDefaultDesignSettings: false,
 };
 
 /** A fresh editable draft, optionally seeded from a base config. */
@@ -581,14 +581,29 @@ function ConfigEditor({
         </div>
       )}
 
-      {enforcedByGroup.map(({ group, fields }) => (
-        <section className="panel cfg-panel" key={group}>
-          <div className="cfg-sec-h">{group}</div>
-          {fields.map((f) => (
-            <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
-          ))}
-        </section>
-      ))}
+      {enforcedByGroup.map(({ group, fields }) => {
+        if (group === 'Display') {
+          const designKeys = new Set(['useDefaultDesignSettings', 'backgroundColor', 'textColor', 'backgroundImageUrl']);
+          const primaryDisplayFields = fields.filter((f) => !designKeys.has(f.key));
+          return (
+            <section className="panel cfg-panel" key={group}>
+              <div className="cfg-sec-h">{group}</div>
+              <LauncherDesignControl draft={draft} readOnly={readOnly} setDraft={setDraft} />
+              {primaryDisplayFields.map((f) => (
+                <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
+              ))}
+            </section>
+          );
+        }
+        return (
+          <section className="panel cfg-panel" key={group}>
+            <div className="cfg-sec-h">{group}</div>
+            {fields.map((f) => (
+              <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
+            ))}
+          </section>
+        );
+      })}
 
       <section className="panel cfg-panel">
         <div className="cfg-sec-h" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -769,15 +784,12 @@ function ConfigEditor({
         legacyByGroup.map(({ group, fields }) => {
           if (group === 'Display') {
             const designKeys = new Set(['useDefaultDesignSettings', 'backgroundColor', 'textColor', 'backgroundImageUrl']);
-            const otherFields = fields.filter((f) => !designKeys.has(f.key));
+            const legacyDisplayFields = fields.filter((f) => !designKeys.has(f.key));
+            if (legacyDisplayFields.length === 0) return null;
             return (
               <section className="panel cfg-panel" key={group}>
                 <div className="cfg-sec-h">{group}</div>
-                {otherFields.filter((f) => ['autoBrightness', 'brightness', 'manageTimeout', 'timeout', 'manageVolume', 'volume', 'orientation'].includes(f.key)).map((f) => (
-                  <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
-                ))}
-                <LauncherDesignControl draft={draft} readOnly={readOnly} setDraft={setDraft} />
-                {otherFields.filter((f) => !['autoBrightness', 'brightness', 'manageTimeout', 'timeout', 'manageVolume', 'volume', 'orientation'].includes(f.key)).map((f) => (
+                {legacyDisplayFields.map((f) => (
                   <Field key={f.key} def={f} value={draft[f.key]} apps={apps} assigned={allowed} disabled={readOnly} configName={draft.name} onChange={(v) => set(f.key, v)} />
                 ))}
               </section>
@@ -906,11 +918,12 @@ function BackgroundImageControl({
   );
 }
 
-type DesignMode = 'DEFAULT' | 'COLOR' | 'IMAGE';
+type DesignMode = 'COLOR' | 'IMAGE';
 
 function getDesignMode(draft: Configuration): DesignMode {
-  if (draft.useDefaultDesignSettings) return 'DEFAULT';
-  if (draft.backgroundImageUrl !== null && draft.backgroundImageUrl !== undefined) return 'IMAGE';
+  if (draft.backgroundImageUrl !== null && draft.backgroundImageUrl !== undefined && String(draft.backgroundImageUrl).trim().length > 0) {
+    return 'IMAGE';
+  }
   return 'COLOR';
 }
 
@@ -923,16 +936,11 @@ function LauncherDesignControl({
   readOnly: boolean;
   setDraft: React.Dispatch<React.SetStateAction<Configuration>>;
 }) {
-  const mode = getDesignMode(draft);
+  const [mode, setMode] = useState<DesignMode>(() => getDesignMode(draft));
 
   const handleModeChange = (newMode: DesignMode) => {
-    if (newMode === 'DEFAULT') {
-      setDraft((d) => ({
-        ...d,
-        useDefaultDesignSettings: true,
-        backgroundImageUrl: null,
-      }));
-    } else if (newMode === 'COLOR') {
+    setMode(newMode);
+    if (newMode === 'COLOR') {
       setDraft((d) => ({
         ...d,
         useDefaultDesignSettings: false,
@@ -952,13 +960,12 @@ function LauncherDesignControl({
       <div className="cfg-field-label">
         <label>Launcher design</label>
         <span className="cfg-field-help">
-          Select default server design, custom background color, or a custom background picture.
+          Select custom background color or a custom background picture.
         </span>
       </div>
       <div className="cfg-field-ctl" style={{ width: '100%', flexDirection: 'column', gap: '12px' }}>
         <span className="seg">
           {[
-            { v: 'DEFAULT', l: 'Default design' },
             { v: 'COLOR', l: 'Custom color' },
             { v: 'IMAGE', l: 'Background picture' },
           ].map((o) => (
@@ -974,12 +981,6 @@ function LauncherDesignControl({
           ))}
         </span>
 
-        {mode === 'DEFAULT' && (
-          <div className="note" style={{ margin: 0 }}>
-            Using default design settings from global server settings.
-          </div>
-        )}
-
         {mode === 'COLOR' && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', width: '100%' }}>
             <div>
@@ -988,7 +989,7 @@ function LauncherDesignControl({
                 type="color"
                 value={draft.backgroundColor ? String(draft.backgroundColor) : '#ffffff'}
                 disabled={readOnly}
-                onChange={(e) => setDraft((d) => ({ ...d, backgroundColor: e.target.value }))}
+                onChange={(e) => setDraft((d) => ({ ...d, backgroundColor: e.target.value, useDefaultDesignSettings: false }))}
               />
             </div>
             <div>
@@ -997,7 +998,7 @@ function LauncherDesignControl({
                 type="color"
                 value={draft.textColor ? String(draft.textColor) : '#000000'}
                 disabled={readOnly}
-                onChange={(e) => setDraft((d) => ({ ...d, textColor: e.target.value }))}
+                onChange={(e) => setDraft((d) => ({ ...d, textColor: e.target.value, useDefaultDesignSettings: false }))}
               />
             </div>
           </div>
@@ -1020,7 +1021,7 @@ function LauncherDesignControl({
                 type="color"
                 value={draft.textColor ? String(draft.textColor) : '#000000'}
                 disabled={readOnly}
-                onChange={(e) => setDraft((d) => ({ ...d, textColor: e.target.value }))}
+                onChange={(e) => setDraft((d) => ({ ...d, textColor: e.target.value, useDefaultDesignSettings: false }))}
               />
             </div>
           </div>
