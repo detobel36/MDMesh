@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -19,9 +20,13 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.mdmesh.agent.service.CheckInService
 import com.mdmesh.core.config.ServerConfigStore
+import com.mdmesh.core.kiosk.KioskApplier
+import com.mdmesh.core.store.ConfigStateStore
 import com.mdmesh.core.store.DeviceIdStore
+import com.mdmesh.core.store.KioskStateStore
 import com.mdmesh.core.sync.SyncStatus
 import com.mdmesh.policy.wifi.DpmHandle
+import com.mdmesh.proto.KioskApplyPayload
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -44,6 +49,9 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var serverConfig: ServerConfigStore
     @Inject lateinit var syncStatus: SyncStatus
     @Inject lateinit var eventLog: com.mdmesh.core.telemetry.EventLog
+    @Inject lateinit var kioskApplier: KioskApplier
+    @Inject lateinit var kioskStateStore: KioskStateStore
+    @Inject lateinit var configStateStore: ConfigStateStore
 
     private lateinit var deviceIdValue: TextView
     private lateinit var kioskValue: TextView
@@ -151,6 +159,19 @@ class MainActivity : ComponentActivity() {
         root.addView(label("KIOSK"))
         kioskValue = text("…", 16f, TEXT)
         root.addView(kioskValue)
+        val enableKioskBtn = Button(this).apply {
+            text = "Enable Kiosk mode"
+            setOnClickListener {
+                lifecycleScope.launch {
+                    val savedPayload = kioskStateStore.load()
+                        ?: configStateStore.load()?.kiosk
+                        ?: KioskApplyPayload()
+                    kioskApplier.enter(savedPayload)
+                    refresh()
+                }
+            }
+        }
+        root.addView(enableKioskBtn)
         root.addView(spacer())
 
         root.addView(label("AGENT VERSION"))
