@@ -38,4 +38,13 @@ class ScreenCapturePermissionActivity : Activity() {
 object MediaProjectionDataStore {
     @Volatile
     var projectionData: Intent? = null
+        set(value) {
+            field = value
+            if (value != null) {
+                onDataAvailable?.invoke(value)
+            }
+        }
+
+    @Volatile
+    var onDataAvailable: ((Intent) -> Unit)? = null
 }

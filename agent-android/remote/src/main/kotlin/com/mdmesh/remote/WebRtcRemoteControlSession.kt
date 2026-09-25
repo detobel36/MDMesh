@@ -150,33 +150,22 @@ class WebRtcRemoteControlSession(
         peerConnection = factory?.createPeerConnection(rtcConfig, observer)
             ?: throw IllegalStateException("Failed to create PeerConnection")
 
+        videoSource = factory?.createVideoSource(true)
+
         val intentData = mediaProjectionData ?: MediaProjectionDataStore.projectionData
         if (intentData != null) {
-            Log.d(TAG, "Starting ScreenCaptureService and MediaProjection for session: $sessionId")
-            ScreenCaptureService.startService(context)
-            val screenCapturer = ScreenCapturerAndroid(intentData, object : MediaProjection.Callback() {
-                override fun onStop() {
-                    Log.w(TAG, "MediaProjection stopped by system/user for session: $sessionId")
-                    scope.launch { stop(sessionId) }
-                }
-            })
-            capturer = screenCapturer
-            surfaceTextureHelper = SurfaceTextureHelper.create("ScreenCaptureThread", null)
-            videoSource = factory?.createVideoSource(screenCapturer.isScreencast)
-            surfaceTextureHelper?.let { helper ->
-                videoSource?.let { vSource ->
-                    screenCapturer.initialize(helper, context, vSource.capturerObserver)
-                    screenCapturer.startCapture(720, 1280, 30)
-                }
-            }
+            setupScreenCapturer(intentData, sessionId)
         } else {
-            Log.w(TAG, "No MediaProjection data found; prompting consent activity for session: $sessionId")
+            Log.w(TAG, "No MediaProjection data found; registering onDataAvailable listener and prompting consent activity for session: $sessionId")
+            MediaProjectionDataStore.onDataAvailable = { data ->
+                Log.d(TAG, "MediaProjection data granted by user for session: $sessionId")
+                setupScreenCapturer(data, sessionId)
+            }
             // Prompt for MediaProjection capture consent via Activity
             val promptIntent = Intent(context, ScreenCapturePermissionActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             runCatching { context.startActivity(promptIntent) }
-            videoSource = factory?.createVideoSource(true)
         }
 
         videoSource?.let { vSource ->
@@ -286,8 +275,33 @@ class WebRtcRemoteControlSession(
         }
     }
 
+    private fun setupScreenCapturer(intentData: Intent, sessionId: String) {
+        if (capturer != null) return
+        Log.d(TAG, "Starting ScreenCaptureService and MediaProjection for session: $sessionId")
+        ScreenCaptureService.startService(context)
+        val screenCapturer = ScreenCapturerAndroid(intentData, object : MediaProjection.Callback() {
+            override fun onStop() {
+                Log.w(TAG, "MediaProjection stopped by system/user for session: $sessionId")
+                scope.launch { stop(sessionId) }
+            }
+        })
+        capturer = screenCapturer
+        val helper = surfaceTextureHelper ?: SurfaceTextureHelper.create("ScreenCaptureThread", null).also {
+            surfaceTextureHelper = it
+        }
+        val vSource = videoSource ?: factory?.createVideoSource(screenCapturer.isScreencast).also {
+            videoSource = it
+        }
+        if (vSource != null && helper != null) {
+            screenCapturer.initialize(helper, context, vSource.capturerObserver)
+            screenCapturer.startCapture(720, 1280, 30)
+            Log.d(TAG, "ScreenCapturerAndroid started capturing frames for session: $sessionId")
+        }
+    }
+
     private fun cleanupWebRtc() {
         Log.d(TAG, "Cleaning up WebRTC resources")
+        MediaProjectionDataStore.onDataAvailable = null
         runCatching { ScreenCaptureService.stopService(context) }
         runCatching { capturer?.stopCapture() }
         runCatching { capturer?.dispose() }

@@ -36,9 +36,19 @@ class RemoteStartSessionHandler(
             RemoteControlSession.Mode.VIEW
         }
 
+        val promptNeeded = com.mdmesh.remote.MediaProjectionDataStore.projectionData == null
+        if (promptNeeded) {
+            eventSink?.record("remote.startSession", "Prompting screen capture consent on device")
+        }
+
         val result = session.start(payload.sessionId, mode)
         return if (result.isSuccess) {
-            eventSink?.record("remote.startSession", "Screen sharing started (session: ${payload.sessionId})")
+            val detail = if (promptNeeded && com.mdmesh.remote.MediaProjectionDataStore.projectionData == null) {
+                "Waiting for user permission on device prompt (session: ${payload.sessionId})"
+            } else {
+                "Screen sharing active (session: ${payload.sessionId})"
+            }
+            eventSink?.record("remote.startSession", detail)
             CommandResults.done(command, "remote session started: ${payload.sessionId}")
         } else {
             val err = result.exceptionOrNull()?.message ?: "start session failed"
