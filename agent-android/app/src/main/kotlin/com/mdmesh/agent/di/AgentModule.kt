@@ -333,17 +333,27 @@ object AgentModule {
         @ApplicationContext context: Context,
         identity: DeviceIdentity,
         api: MdmApi,
+        eventSink: EventSink,
     ): RemoteControlSession = WebRtcRemoteControlSession(
         context = context,
         sendSignal = { dto ->
-            val secret = identity.secret() ?: return@WebRtcRemoteControlSession
-            runCatching { api.sendRemoteSignal("Bearer $secret", dto.sessionId, dto) }
+            val secret = identity.secret()
+            if (secret != null) {
+                runCatching { api.sendRemoteSignal("Bearer $secret", dto.sessionId, dto) }
+            }
         },
         fetchSignals = { sessionId ->
-            val secret = identity.secret() ?: return@WebRtcRemoteControlSession emptyList()
-            val result = runCatching { api.getRemoteSignals("Bearer $secret", sessionId) }.getOrNull()
-            result?.data ?: emptyList()
-        }
+            val secret = identity.secret()
+            if (secret != null) {
+                val result = runCatching { api.getRemoteSignals("Bearer $secret", sessionId) }.getOrNull()
+                result?.data ?: emptyList()
+            } else {
+                emptyList()
+            }
+        },
+        onEventLog = { type, detail ->
+            eventSink.record(type, detail)
+        },
     )
 
     @Provides
