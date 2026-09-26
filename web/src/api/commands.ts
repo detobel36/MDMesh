@@ -134,6 +134,11 @@ export interface CommandTemplateExt extends CommandTemplate {
 
 export const ACTION_TEMPLATES: CommandTemplateExt[] = [
   {
+    key: 'view-screen', label: 'View Screen', group: 'safe',
+    description: 'Start a live WebRTC screen-viewing session with the device.',
+    request: { type: 'remote.startSession', requiresCapability: 'remote.view' },
+  },
+  {
     key: 'lockscreen-message', label: 'Set lock-screen message', group: 'safe',
     description: 'Show a custom message on the device lock screen (empty clears it).',
     params: [{ key: 'message', label: 'Message', kind: 'text', placeholder: 'Property of ACME IT' }],
