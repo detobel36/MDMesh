@@ -215,8 +215,16 @@ class WebRtcRemoteControlSession(
                     }
                 }
 
-                override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
-                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
+                override fun onSignalingChange(state: PeerConnection.SignalingState?) {
+                    Log.d(TAG, "SignalingState changed: $state")
+                    onEventLog?.invoke("webrtc.state", "SignalingState: $state")
+                }
+
+                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                    Log.d(TAG, "IceConnectionState changed: $state")
+                    onEventLog?.invoke("webrtc.state", "ICE connection state: $state")
+                }
+
                 override fun onIceConnectionReceivingChange(receiving: Boolean) {}
                 override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
                 override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
@@ -230,13 +238,23 @@ class WebRtcRemoteControlSession(
             peerConnection = factory?.createPeerConnection(rtcConfig, observer)
                 ?: throw IllegalStateException("Failed to create PeerConnection")
 
-            setupScreenCapturer(intentData, sessionId)
+            // On Android 14 (API 34), ScreenCapturerAndroid creates a MediaProjection instance.
+            // A mediaProjection foreground service MUST be active and initialized before
+            // MediaProjection is created, otherwise Android throws SecurityException.
+            try {
+                setupScreenCapturer(intentData, sessionId)
+            } catch (e: Throwable) {
+                Log.e(TAG, "setupScreenCapturer error for session $sessionId: ${e.message}", e)
+                onEventLog?.invoke("webrtc.capturer", "Screen capturer error: ${e.javaClass.simpleName} - ${e.message}")
+            }
 
             videoSource?.let { vSource ->
                 val vTrack = factory?.createVideoTrack("ARDAMSv0", vSource)
                 videoTrack = vTrack
                 if (vTrack != null) {
                     peerConnection?.addTrack(vTrack, listOf("ARDAMS"))
+                    Log.d(TAG, "Added videoTrack to peerConnection for session: $sessionId")
+                    onEventLog?.invoke("webrtc.track", "Added videoTrack to PeerConnection")
                 }
             }
 
@@ -382,7 +400,7 @@ class WebRtcRemoteControlSession(
             }
         }.onFailure { e ->
             Log.e(TAG, "Failed to initialize ScreenCapturerAndroid for session: $sessionId", e)
-            onEventLog?.invoke("webrtc.capturer", "Capturer error: ${e.message}")
+            onEventLog?.invoke("webrtc.capturer", "Capturer error: ${e.javaClass.simpleName} - ${e.message}")
         }
     }
 
