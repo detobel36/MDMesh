@@ -77,10 +77,14 @@ class ScreenCaptureService : Service() {
             val intent = Intent(context, ScreenCaptureService::class.java).apply {
                 action = ACTION_START
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ScreenCaptureService", "Failed to start ScreenCaptureService: ${e.message}", e)
             }
         }
 

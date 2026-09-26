@@ -113,9 +113,16 @@ export function ScreenViewModal({ deviceNumber, onClose }: Props) {
 
         // Signaling poll loop
         addLog('Starting signal polling loop...');
+        let pollCount = 0;
         pollTimerRef.current = setInterval(() => {
           if (cancelled || !sessionIdRef.current) return;
           const currentSessionId = sessionIdRef.current;
+          pollCount++;
+
+          // If no signal received after 50 polls (~25 sec) and still waiting, report timeout
+          if (pollCount > 50 && pcRef.current?.remoteDescription === null) {
+            addLog('Timed out waiting for WebRTC offer from device agent. Ensure screen recording permission is granted on device.', 'warn');
+          }
 
           void getRemoteSignals(deviceNumber, currentSessionId)
             .then(async (signals: RemoteSignal[]) => {

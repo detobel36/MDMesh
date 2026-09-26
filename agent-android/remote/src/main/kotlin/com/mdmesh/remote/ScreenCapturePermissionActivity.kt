@@ -25,14 +25,21 @@ class ScreenCapturePermissionActivity : Activity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == REQUEST_CODE) {
-            if (resultCode == RESULT_OK && data != null) {
-                ScreenCaptureService.startService(this)
-                MediaProjectionDataStore.projectionData = data
+        try {
+            if (requestCode == REQUEST_CODE) {
+                if (resultCode == RESULT_OK && data != null) {
+                    ScreenCaptureService.startService(this)
+                    MediaProjectionDataStore.projectionData = data
+                } else {
+                    android.util.Log.w("ScreenCapturePerm", "Screen capture permission not granted, resultCode: $resultCode")
+                }
+                finish()
+            } else {
+                super.onActivityResult(requestCode, resultCode, data)
             }
+        } catch (e: Exception) {
+            android.util.Log.e("ScreenCapturePerm", "Error in onActivityResult: ${e.message}", e)
             finish()
-        } else {
-            super.onActivityResult(requestCode, resultCode, data)
         }
     }
 
