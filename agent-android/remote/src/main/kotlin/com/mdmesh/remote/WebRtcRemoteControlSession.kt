@@ -284,24 +284,28 @@ class WebRtcRemoteControlSession(
     private fun setupScreenCapturer(intentData: Intent, sessionId: String) {
         if (capturer != null) return
         Log.d(TAG, "Starting ScreenCaptureService and MediaProjection for session: $sessionId")
-        ScreenCaptureService.startService(context)
-        val screenCapturer = ScreenCapturerAndroid(intentData, object : MediaProjection.Callback() {
-            override fun onStop() {
-                Log.w(TAG, "MediaProjection stopped by system/user for session: $sessionId")
-                scope.launch { stop(sessionId) }
+        runCatching {
+            ScreenCaptureService.startService(context)
+            val screenCapturer = ScreenCapturerAndroid(intentData, object : MediaProjection.Callback() {
+                override fun onStop() {
+                    Log.w(TAG, "MediaProjection stopped by system/user for session: $sessionId")
+                    scope.launch { stop(sessionId) }
+                }
+            })
+            capturer = screenCapturer
+            val helper = surfaceTextureHelper ?: SurfaceTextureHelper.create("ScreenCaptureThread", null).also {
+                surfaceTextureHelper = it
             }
-        })
-        capturer = screenCapturer
-        val helper = surfaceTextureHelper ?: SurfaceTextureHelper.create("ScreenCaptureThread", null).also {
-            surfaceTextureHelper = it
-        }
-        val vSource = videoSource ?: factory?.createVideoSource(screenCapturer.isScreencast).also {
-            videoSource = it
-        }
-        if (vSource != null && helper != null) {
-            screenCapturer.initialize(helper, context, vSource.capturerObserver)
-            screenCapturer.startCapture(720, 1280, 30)
-            Log.d(TAG, "ScreenCapturerAndroid started capturing frames for session: $sessionId")
+            val vSource = videoSource ?: factory?.createVideoSource(screenCapturer.isScreencast).also {
+                videoSource = it
+            }
+            if (vSource != null && helper != null) {
+                screenCapturer.initialize(helper, context, vSource.capturerObserver)
+                screenCapturer.startCapture(720, 1280, 30)
+                Log.d(TAG, "ScreenCapturerAndroid started capturing frames for session: $sessionId")
+            }
+        }.onFailure { e ->
+            Log.e(TAG, "Failed to initialize ScreenCapturerAndroid for session: $sessionId", e)
         }
     }
 

@@ -17,6 +17,11 @@ class ScreenCaptureService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        startForegroundNotification()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         if (action == ACTION_STOP) {
