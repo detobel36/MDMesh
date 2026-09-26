@@ -92,16 +92,7 @@ class WebRtcRemoteControlSession(
 
     private fun initWebRtcAndStartCapture(sessionId: String) {
         Log.d(TAG, "Initializing PeerConnectionFactory and PeerConnection for session: $sessionId")
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(context)
-                .setEnableInternalTracer(false)
-                .createInitializationOptions()
-        )
-
-        val factoryOptions = PeerConnectionFactory.Options()
-        factory = PeerConnectionFactory.builder()
-            .setOptions(factoryOptions)
-            .createPeerConnectionFactory()
+        factory = getOrCreateFactory(context)
 
         val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -329,7 +320,32 @@ class WebRtcRemoteControlSession(
         runCatching { peerConnection?.close() }
         peerConnection = null
 
-        runCatching { factory?.dispose() }
         factory = null
+    }
+
+    companion object {
+        @Volatile private var isInitialized = false
+        @Volatile private var sharedFactory: PeerConnectionFactory? = null
+
+        @Synchronized
+        private fun getOrCreateFactory(context: Context): PeerConnectionFactory {
+            if (!isInitialized) {
+                PeerConnectionFactory.initialize(
+                    PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
+                        .setEnableInternalTracer(false)
+                        .createInitializationOptions()
+                )
+                isInitialized = true
+            }
+            var f = sharedFactory
+            if (f == null) {
+                val factoryOptions = PeerConnectionFactory.Options()
+                f = PeerConnectionFactory.builder()
+                    .setOptions(factoryOptions)
+                    .createPeerConnectionFactory()
+                sharedFactory = f
+            }
+            return f
+        }
     }
 }
