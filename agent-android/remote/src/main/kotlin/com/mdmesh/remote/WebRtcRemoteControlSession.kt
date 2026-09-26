@@ -153,10 +153,10 @@ class WebRtcRemoteControlSession(
         if (intentData != null) {
             setupScreenCapturer(intentData, sessionId)
         } else {
-            Log.w(TAG, "No MediaProjection data found; starting ScreenCaptureService and prompting consent activity for session: $sessionId")
-            ScreenCaptureService.startService(context)
+            Log.w(TAG, "No MediaProjection data found; registering onDataAvailable listener and prompting consent activity for session: $sessionId")
             MediaProjectionDataStore.onDataAvailable = { data ->
                 Log.d(TAG, "MediaProjection data granted by user for session: $sessionId")
+                onEventLog?.invoke("remote.startSession", "Screen capture permission granted on device")
                 setupScreenCapturer(data, sessionId)
             }
             // Prompt for MediaProjection capture consent via Activity
@@ -166,8 +166,10 @@ class WebRtcRemoteControlSession(
             runCatching {
                 context.startActivity(promptIntent)
                 Log.d(TAG, "Successfully requested ScreenCapturePermissionActivity launch for session: $sessionId")
+                onEventLog?.invoke("remote.startSession", "Launched screen capture consent prompt on device")
             }.onFailure { e ->
                 Log.e(TAG, "Failed to start ScreenCapturePermissionActivity for session: $sessionId", e)
+                onEventLog?.invoke("remote.startSession", "Failed to launch consent prompt: ${e.message}")
             }
         }
 
@@ -320,6 +322,7 @@ class WebRtcRemoteControlSession(
     private fun cleanupWebRtc() {
         Log.d(TAG, "Cleaning up WebRTC resources")
         MediaProjectionDataStore.onDataAvailable = null
+        MediaProjectionDataStore.projectionData = null
         runCatching { ScreenCaptureService.stopService(context) }
         runCatching { capturer?.stopCapture() }
         runCatching { capturer?.dispose() }

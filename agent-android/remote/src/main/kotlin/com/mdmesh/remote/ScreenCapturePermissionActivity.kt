@@ -12,15 +12,23 @@ import android.os.Bundle
  */
 class ScreenCapturePermissionActivity : Activity() {
 
+    private var permissionRequested = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ScreenCaptureService.startService(this)
-        val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        try {
-            startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_CODE)
-        } catch (e: Exception) {
-            android.util.Log.e("ScreenCapturePerm", "Failed to launch screen capture intent", e)
-            finish()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!permissionRequested) {
+            permissionRequested = true
+            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            try {
+                startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_CODE)
+            } catch (e: Exception) {
+                android.util.Log.e("ScreenCapturePerm", "Failed to launch screen capture intent", e)
+                finish()
+            }
         }
     }
 

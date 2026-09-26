@@ -19,19 +19,32 @@ class ScreenCaptureService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForegroundNotification()
+        try {
+            startForegroundNotification()
+        } catch (e: Exception) {
+            android.util.Log.e("ScreenCaptureService", "Failed to start foreground notification in onCreate: ${e.message}", e)
+            stopSelf()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
-        if (action == ACTION_STOP) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
+        try {
+            startForegroundNotification()
+        } catch (e: Exception) {
+            android.util.Log.e("ScreenCaptureService", "Failed to start foreground notification in onStartCommand: ${e.message}", e)
             stopSelf()
             return START_NOT_STICKY
         }
-
-        startForegroundNotification()
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (e: Exception) {
+            // Ignore
+        }
+        super.onDestroy()
     }
 
     private fun startForegroundNotification() {
@@ -70,13 +83,9 @@ class ScreenCaptureService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 8801
-        const val ACTION_START = "com.mdmesh.remote.action.START_CAPTURE"
-        const val ACTION_STOP = "com.mdmesh.remote.action.STOP_CAPTURE"
 
         fun startService(context: Context) {
-            val intent = Intent(context, ScreenCaptureService::class.java).apply {
-                action = ACTION_START
-            }
+            val intent = Intent(context, ScreenCaptureService::class.java)
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)
@@ -89,10 +98,11 @@ class ScreenCaptureService : Service() {
         }
 
         fun stopService(context: Context) {
-            val intent = Intent(context, ScreenCaptureService::class.java).apply {
-                action = ACTION_STOP
+            try {
+                context.stopService(Intent(context, ScreenCaptureService::class.java))
+            } catch (e: Exception) {
+                android.util.Log.e("ScreenCaptureService", "Failed to stop ScreenCaptureService: ${e.message}", e)
             }
-            context.startService(intent)
         }
     }
 }
