@@ -49,7 +49,7 @@ class WebRtcRemoteControlSession(
     private val onEventLog: ((String, String?) -> Unit)? = null,
 ) : RemoteControlSession {
 
-    private val eglBase: EglBase by lazy { EglBase.create() }
+    private var eglBase: EglBase? = null
     @Volatile private var activeSessionId: String? = null
     private val isRunning = AtomicBoolean(false)
     private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -101,7 +101,9 @@ class WebRtcRemoteControlSession(
 
     private fun initWebRtcAndStartCapture(sessionId: String) {
         Log.d(TAG, "Initializing PeerConnectionFactory and PeerConnection for session: $sessionId")
-        factory = getOrCreateFactory(context, eglBase.eglBaseContext)
+        val egl = getEglBase(context)
+        eglBase = egl
+        factory = getOrCreateFactory(context)
 
         val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -305,7 +307,8 @@ class WebRtcRemoteControlSession(
                 }
             })
             capturer = screenCapturer
-            val helper = surfaceTextureHelper ?: SurfaceTextureHelper.create("ScreenCaptureThread", eglBase.eglBaseContext).also {
+            val eglContext = (eglBase ?: getEglBase(context)).eglBaseContext
+            val helper = surfaceTextureHelper ?: SurfaceTextureHelper.create("ScreenCaptureThread", eglContext).also {
                 surfaceTextureHelper = it
             }
             val vSource = videoSource ?: factory?.createVideoSource(screenCapturer.isScreencast).also {
@@ -350,9 +353,10 @@ class WebRtcRemoteControlSession(
     companion object {
         @Volatile private var isInitialized = false
         @Volatile private var sharedFactory: PeerConnectionFactory? = null
+        @Volatile private var sharedEglBase: EglBase? = null
 
         @Synchronized
-        private fun getOrCreateFactory(context: Context, eglContext: EglBase.Context): PeerConnectionFactory {
+        private fun ensureInitialized(context: Context) {
             if (!isInitialized) {
                 try {
                     PeerConnectionFactory.initialize(
@@ -365,8 +369,25 @@ class WebRtcRemoteControlSession(
                 }
                 isInitialized = true
             }
+        }
+
+        @Synchronized
+        fun getEglBase(context: Context): EglBase {
+            ensureInitialized(context)
+            var egl = sharedEglBase
+            if (egl == null) {
+                egl = EglBase.create()
+                sharedEglBase = egl
+            }
+            return egl
+        }
+
+        @Synchronized
+        private fun getOrCreateFactory(context: Context): PeerConnectionFactory {
+            ensureInitialized(context)
             var f = sharedFactory
             if (f == null) {
+                val eglContext = getEglBase(context).eglBaseContext
                 val encoderFactory: VideoEncoderFactory = try {
                     DefaultVideoEncoderFactory(eglContext, true, true)
                 } catch (e: Throwable) {

@@ -5,9 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.widget.TextView
 
 /**
- * Transparent activity that requests MediaProjection screen capture consent from user/admin
+ * Dialog activity that requests MediaProjection screen capture consent from user/admin
  * and stores the granted Intent for [WebRtcRemoteControlSession].
  */
 class ScreenCapturePermissionActivity : Activity() {
@@ -16,6 +17,11 @@ class ScreenCapturePermissionActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val tv = TextView(this).apply {
+            text = "Requesting screen capture permission..."
+            setPadding(32, 32, 32, 32)
+        }
+        setContentView(tv)
     }
 
     override fun onResume() {
