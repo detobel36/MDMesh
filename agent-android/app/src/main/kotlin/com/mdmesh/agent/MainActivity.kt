@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var deviceIdValue: TextView
     private lateinit var kioskValue: TextView
+    private lateinit var screenCaptureStatusValue: TextView
     private lateinit var debugLogsValue: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,6 +99,11 @@ class MainActivity : ComponentActivity() {
 
     private fun refresh() {
         kioskValue.text = if (isLocked()) "Locked (kiosk active)" else "Not locked"
+        val isCaptureAuthorized = com.mdmesh.remote.MediaProjectionDataStore.projectionData != null
+        if (::screenCaptureStatusValue.isInitialized) {
+            screenCaptureStatusValue.text = if (isCaptureAuthorized) "Authorized — Screen capture permission granted" else "Not authorized"
+            screenCaptureStatusValue.setTextColor(if (isCaptureAuthorized) OK else ALERT)
+        }
         lifecycleScope.launch {
             val id = deviceIdStore.current()
             deviceIdValue.text = if (id.isNullOrBlank()) enrollingLabel() else id
@@ -182,6 +188,26 @@ class MainActivity : ComponentActivity() {
             }
         }
         root.addView(enableKioskBtn)
+        root.addView(spacer())
+
+        root.addView(label("SCREEN CAPTURE"))
+        val isCaptureAuthorized = com.mdmesh.remote.MediaProjectionDataStore.projectionData != null
+        screenCaptureStatusValue = text(
+            if (isCaptureAuthorized) "Authorized — Screen capture permission granted" else "Not authorized",
+            15f,
+            if (isCaptureAuthorized) OK else ALERT,
+        )
+        root.addView(screenCaptureStatusValue)
+        val grantCaptureBtn = Button(this).apply {
+            text = "Grant Screen Capture Permission"
+            setOnClickListener {
+                runCatching {
+                    val intent = Intent(this@MainActivity, com.mdmesh.remote.ScreenCapturePermissionActivity::class.java)
+                    startActivity(intent)
+                }
+            }
+        }
+        root.addView(grantCaptureBtn)
         root.addView(spacer())
 
         root.addView(label("AGENT VERSION"))

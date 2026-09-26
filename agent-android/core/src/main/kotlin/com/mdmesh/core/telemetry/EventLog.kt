@@ -28,42 +28,50 @@ class EventLog @Inject constructor(@ApplicationContext context: Context) : Event
 
     @Synchronized
     override fun record(type: String, detail: String?) {
-        val list = load().toMutableList()
-        list.add(TelemetryEventDto(type, System.currentTimeMillis(), detail))
-        save(cap(list))
+        val event = TelemetryEventDto(type, System.currentTimeMillis(), detail)
+
+        val list = load(KEY).toMutableList()
+        list.add(event)
+        save(KEY, cap(list, CAP))
+
+        val history = load(KEY_HISTORY).toMutableList()
+        history.add(event)
+        save(KEY_HISTORY, cap(history, HISTORY_CAP))
     }
 
     @Synchronized
     override fun drain(): List<TelemetryEventDto> {
-        val l = load()
+        val l = load(KEY)
         prefs.edit().remove(KEY).apply()
         return l
     }
 
     @Synchronized
     override fun restore(events: List<TelemetryEventDto>) {
-        save(cap(events + load()))
+        save(KEY, cap(events + load(KEY), CAP))
     }
 
     @Synchronized
     override fun peekRecent(limit: Int): List<TelemetryEventDto> {
-        val l = load()
+        val l = load(KEY_HISTORY)
         return if (l.size <= limit) l else l.takeLast(limit)
     }
 
-    private fun load(): List<TelemetryEventDto> = decode(prefs.getString(KEY, null))
-    private fun save(list: List<TelemetryEventDto>) {
-        prefs.edit().putString(KEY, encode(list)).apply()
+    private fun load(key: String): List<TelemetryEventDto> = decode(prefs.getString(key, null))
+    private fun save(key: String, list: List<TelemetryEventDto>) {
+        prefs.edit().putString(key, encode(list)).apply()
     }
 
     companion object {
         private const val KEY = "events"
+        private const val KEY_HISTORY = "events_history"
         private const val CAP = 500
+        private const val HISTORY_CAP = 100
         private val json = Json { ignoreUnknownKeys = true }
 
-        /** Keep the most recent [CAP] events. */
-        fun cap(list: List<TelemetryEventDto>): List<TelemetryEventDto> =
-            if (list.size <= CAP) list else list.takeLast(CAP)
+        /** Keep the most recent [max] events. */
+        fun cap(list: List<TelemetryEventDto>, max: Int = CAP): List<TelemetryEventDto> =
+            if (list.size <= max) list else list.takeLast(max)
 
         fun encode(list: List<TelemetryEventDto>): String =
             json.encodeToString(ListSerializer(TelemetryEventDto.serializer()), list)
