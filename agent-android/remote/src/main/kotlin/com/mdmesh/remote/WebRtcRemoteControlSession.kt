@@ -9,6 +9,10 @@ import com.mdmesh.proto.RemoteSignalDto
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
+import org.webrtc.SoftwareVideoDecoderFactory
+import org.webrtc.SoftwareVideoEncoderFactory
+import org.webrtc.VideoDecoderFactory
+import org.webrtc.VideoEncoderFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -350,17 +354,31 @@ class WebRtcRemoteControlSession(
         @Synchronized
         private fun getOrCreateFactory(context: Context, eglContext: EglBase.Context): PeerConnectionFactory {
             if (!isInitialized) {
-                PeerConnectionFactory.initialize(
-                    PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
-                        .setEnableInternalTracer(false)
-                        .createInitializationOptions()
-                )
+                try {
+                    PeerConnectionFactory.initialize(
+                        PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
+                            .setEnableInternalTracer(false)
+                            .createInitializationOptions()
+                    )
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Error initializing PeerConnectionFactory: ${e.message}", e)
+                }
                 isInitialized = true
             }
             var f = sharedFactory
             if (f == null) {
-                val encoderFactory = DefaultVideoEncoderFactory(eglContext, true, true)
-                val decoderFactory = DefaultVideoDecoderFactory(eglContext)
+                val encoderFactory: VideoEncoderFactory = try {
+                    DefaultVideoEncoderFactory(eglContext, true, true)
+                } catch (e: Throwable) {
+                    Log.w(TAG, "DefaultVideoEncoderFactory failed, fallback to SoftwareVideoEncoderFactory: ${e.message}")
+                    SoftwareVideoEncoderFactory()
+                }
+                val decoderFactory: VideoDecoderFactory = try {
+                    DefaultVideoDecoderFactory(eglContext)
+                } catch (e: Throwable) {
+                    Log.w(TAG, "DefaultVideoDecoderFactory failed, fallback to SoftwareVideoDecoderFactory: ${e.message}")
+                    SoftwareVideoDecoderFactory()
+                }
                 val factoryOptions = PeerConnectionFactory.Options()
                 f = PeerConnectionFactory.builder()
                     .setOptions(factoryOptions)
