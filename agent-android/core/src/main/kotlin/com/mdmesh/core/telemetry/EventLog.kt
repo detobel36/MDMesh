@@ -14,6 +14,7 @@ interface EventSink {
     fun record(type: String, detail: String? = null)
     fun drain(): List<TelemetryEventDto>
     fun restore(events: List<TelemetryEventDto>)
+    fun peekRecent(limit: Int = 10): List<TelemetryEventDto> = emptyList()
 }
 
 /**
@@ -42,6 +43,12 @@ class EventLog @Inject constructor(@ApplicationContext context: Context) : Event
     @Synchronized
     override fun restore(events: List<TelemetryEventDto>) {
         save(cap(events + load()))
+    }
+
+    @Synchronized
+    override fun peekRecent(limit: Int): List<TelemetryEventDto> {
+        val l = load()
+        return if (l.size <= limit) l else l.takeLast(limit)
     }
 
     private fun load(): List<TelemetryEventDto> = decode(prefs.getString(KEY, null))

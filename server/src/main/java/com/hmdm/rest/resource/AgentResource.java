@@ -93,6 +93,7 @@ public class AgentResource {
     private AgentCommandDAO commandDAO;
     private com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller;
     private com.hmdm.rest.resource.support.ConfigReconciler configReconciler;
+    private com.hmdm.rest.resource.support.RemoteSessionManager remoteSessionManager;
 
     /**
      * <p>A constructor required by Swagger.</p>
@@ -105,12 +106,14 @@ public class AgentResource {
                          AgentEnrollmentTokenDAO tokenDAO,
                          AgentCommandDAO commandDAO,
                          com.hmdm.rest.resource.support.ConfigAppInstaller configAppInstaller,
-                         com.hmdm.rest.resource.support.ConfigReconciler configReconciler) {
+                         com.hmdm.rest.resource.support.ConfigReconciler configReconciler,
+                         com.hmdm.rest.resource.support.RemoteSessionManager remoteSessionManager) {
         this.unsecureDAO = unsecureDAO;
         this.tokenDAO = tokenDAO;
         this.commandDAO = commandDAO;
         this.configAppInstaller = configAppInstaller;
         this.configReconciler = configReconciler;
+        this.remoteSessionManager = remoteSessionManager;
     }
 
     // =================================================================================================================
@@ -373,6 +376,44 @@ public class AgentResource {
         }
 
         return Response.OK(new AgentCheckInResponse(commands));
+    }
+
+    // =================================================================================================================
+    @ApiOperation(value = "Send remote signal from agent", notes = "Agent posts SDP offer/ICE candidate/status signal.")
+    @POST
+    @Path("/remote/session/{sessionId}/signal")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response sendRemoteSignal(@HeaderParam("Authorization") String authorization,
+                                     @javax.ws.rs.PathParam("sessionId") String sessionId,
+                                     JsonNode signal) {
+        com.hmdm.rest.resource.support.RemoteSessionManager.RemoteSession session = remoteSessionManager.getSession(sessionId);
+        if (session == null) {
+            return Response.ERROR("error.agent.session.notFound");
+        }
+        if (!authenticate(authorization, session.getDeviceNumber())) {
+            return Response.ERROR("error.agent.unauthorized");
+        }
+        session.pushAgentSignal(signal);
+        return Response.OK();
+    }
+
+    // =================================================================================================================
+    @ApiOperation(value = "Get remote signals for agent", notes = "Agent polls pending SDP answer/ICE candidate signals from browser.")
+    @javax.ws.rs.GET
+    @Path("/remote/session/{sessionId}/signals")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getRemoteSignals(@HeaderParam("Authorization") String authorization,
+                                     @javax.ws.rs.PathParam("sessionId") String sessionId) {
+        com.hmdm.rest.resource.support.RemoteSessionManager.RemoteSession session = remoteSessionManager.getSession(sessionId);
+        if (session == null) {
+            return Response.ERROR("error.agent.session.notFound");
+        }
+        if (!authenticate(authorization, session.getDeviceNumber())) {
+            return Response.ERROR("error.agent.unauthorized");
+        }
+        List<Object> signals = session.pollBrowserSignals();
+        return Response.OK(signals);
     }
 
     /**
