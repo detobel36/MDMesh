@@ -156,16 +156,22 @@ class WebRtcRemoteControlSession(
         if (intentData != null) {
             setupScreenCapturer(intentData, sessionId)
         } else {
-            Log.w(TAG, "No MediaProjection data found; registering onDataAvailable listener and prompting consent activity for session: $sessionId")
+            Log.w(TAG, "No MediaProjection data found; starting ScreenCaptureService and prompting consent activity for session: $sessionId")
+            ScreenCaptureService.startService(context)
             MediaProjectionDataStore.onDataAvailable = { data ->
                 Log.d(TAG, "MediaProjection data granted by user for session: $sessionId")
                 setupScreenCapturer(data, sessionId)
             }
             // Prompt for MediaProjection capture consent via Activity
             val promptIntent = Intent(context, ScreenCapturePermissionActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             }
-            runCatching { context.startActivity(promptIntent) }
+            runCatching {
+                context.startActivity(promptIntent)
+                Log.d(TAG, "Successfully requested ScreenCapturePermissionActivity launch for session: $sessionId")
+            }.onFailure { e ->
+                Log.e(TAG, "Failed to start ScreenCapturePermissionActivity for session: $sessionId", e)
+            }
         }
 
         videoSource?.let { vSource ->
