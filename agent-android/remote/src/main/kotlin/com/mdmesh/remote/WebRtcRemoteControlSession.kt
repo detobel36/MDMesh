@@ -435,18 +435,14 @@ class WebRtcRemoteControlSession(
 
         @Synchronized
         fun ensureInitialized(context: Context) {
-            if (!isInitialized) {
-                try {
-                    PeerConnectionFactory.initialize(
-                        PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
-                            .setEnableInternalTracer(false)
-                            .createInitializationOptions()
-                    )
-                } catch (e: Throwable) {
-                    Log.e(TAG, "Error initializing PeerConnectionFactory: ${e.message}", e)
-                }
-                isInitialized = true
-            }
+            if (isInitialized) return
+            Log.i(TAG, "Initializing WebRTC PeerConnectionFactory native library...")
+            val options = PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
+                .setEnableInternalTracer(false)
+                .createInitializationOptions()
+            PeerConnectionFactory.initialize(options)
+            isInitialized = true
+            Log.i(TAG, "WebRTC PeerConnectionFactory initialized successfully")
         }
 
         @Synchronized
@@ -454,6 +450,7 @@ class WebRtcRemoteControlSession(
             ensureInitialized(context)
             var egl = sharedEglBase
             if (egl == null) {
+                Log.i(TAG, "Creating shared EglBase instance...")
                 egl = EglBase.create()
                 sharedEglBase = egl
             }
@@ -465,8 +462,7 @@ class WebRtcRemoteControlSession(
             ensureInitialized(context)
             var f = sharedFactory
             if (f == null) {
-                // Software Video Encoder / Decoder guarantees system stability and avoids C++ JNI
-                // native driver crashes on hardware MediaCodec probing across various Android devices/emulators.
+                Log.i(TAG, "Creating shared PeerConnectionFactory instance...")
                 val encoderFactory: VideoEncoderFactory = SoftwareVideoEncoderFactory()
                 val decoderFactory: VideoDecoderFactory = SoftwareVideoDecoderFactory()
                 val factoryOptions = PeerConnectionFactory.Options()
@@ -476,6 +472,7 @@ class WebRtcRemoteControlSession(
                     .setVideoDecoderFactory(decoderFactory)
                     .createPeerConnectionFactory()
                 sharedFactory = f
+                Log.i(TAG, "Shared PeerConnectionFactory created successfully")
             }
             return f
         }
