@@ -8,6 +8,7 @@ import com.mdmesh.proto.CommandResult
 import com.mdmesh.proto.ProtocolJson
 import com.mdmesh.proto.RemoteStartSessionPayload
 import com.mdmesh.remote.RemoteControlSession
+import kotlinx.coroutines.CancellationException
 
 /**
  * Handles `remote.startSession` command by dispatching to [RemoteControlSession.start].
@@ -41,7 +42,18 @@ class RemoteStartSessionHandler(
             eventSink?.record("remote.startSession", "Prompting screen capture consent on device")
         }
 
-        val result = session.start(payload.sessionId, mode)
+        val result = try {
+            session.start(payload.sessionId, mode)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val trace = e.stackTraceToString()
+            eventSink?.record(
+                "remote.startSession",
+                "Screen sharing failed: ${e.message}\n$trace",
+            )
+            return CommandResults.failed(command, e.message ?: "start session failed")
+        }
         return if (result.isSuccess) {
             val detail = if (promptNeeded && com.mdmesh.remote.MediaProjectionDataStore.projectionData == null) {
                 "Waiting for user permission on device prompt (session: ${payload.sessionId})"
