@@ -465,19 +465,10 @@ class WebRtcRemoteControlSession(
             ensureInitialized(context)
             var f = sharedFactory
             if (f == null) {
-                val eglContext = getEglBase(context).eglBaseContext
-                val encoderFactory: VideoEncoderFactory = try {
-                    DefaultVideoEncoderFactory(eglContext, true, true)
-                } catch (e: Throwable) {
-                    Log.w(TAG, "DefaultVideoEncoderFactory failed, fallback to SoftwareVideoEncoderFactory: ${e.message}")
-                    SoftwareVideoEncoderFactory()
-                }
-                val decoderFactory: VideoDecoderFactory = try {
-                    DefaultVideoDecoderFactory(eglContext)
-                } catch (e: Throwable) {
-                    Log.w(TAG, "DefaultVideoDecoderFactory failed, fallback to SoftwareVideoDecoderFactory: ${e.message}")
-                    SoftwareVideoDecoderFactory()
-                }
+                // Software Video Encoder / Decoder guarantees system stability and avoids C++ JNI
+                // native driver crashes on hardware MediaCodec probing across various Android devices/emulators.
+                val encoderFactory: VideoEncoderFactory = SoftwareVideoEncoderFactory()
+                val decoderFactory: VideoDecoderFactory = SoftwareVideoDecoderFactory()
                 val factoryOptions = PeerConnectionFactory.Options()
                 f = PeerConnectionFactory.builder()
                     .setOptions(factoryOptions)

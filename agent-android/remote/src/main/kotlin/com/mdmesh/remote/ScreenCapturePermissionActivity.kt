@@ -28,6 +28,10 @@ class ScreenCapturePermissionActivity : Activity() {
         super.onResume()
         if (!permissionRequested) {
             permissionRequested = true
+            // Start the foreground service BEFORE prompting so the media projection foreground service
+            // type is active on Android 14+ prior to user granting consent.
+            ScreenCaptureService.startService(this)
+
             val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             try {
                 startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_CODE)
