@@ -5,6 +5,8 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.mdmesh.agent.service.WakeKeepAlive
 import com.mdmesh.core.sync.CheckInWorker
+import com.mdmesh.core.telemetry.EventLog
+import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -25,8 +27,29 @@ class MdmApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        setupUncaughtExceptionHandler()
+        initializeWebRtcEarly()
         CheckInWorker.schedule(this)   // periodic reconcile (WorkManager floor)
         CheckInWorker.scheduleNow(this) // prompt check-in on every cold start (post-install/reboot)
         WakeKeepAlive.schedule(this)   // doze-proof reconcile heartbeat
+    }
+
+    private fun initializeWebRtcEarly() {
+        try {
+            com.mdmesh.remote.WebRtcRemoteControlSession.ensureInitialized(this)
+        } catch (e: Throwable) {
+            android.util.Log.e("MdmApplication", "Failed to early-initialize WebRTC: ${e.message}", e)
+        }
+    }
+
+    private fun setupUncaughtExceptionHandler() {
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching {
+                val eventLog = EventLog(applicationContext)
+                eventLog.record("crash", "Uncaught exception in ${thread.name}: ${throwable.javaClass.simpleName} - ${throwable.message}")
+            }
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
     }
 }

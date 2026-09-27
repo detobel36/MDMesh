@@ -1,10 +1,23 @@
 package com.mdmesh.remote
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjection
+import android.os.Build
+import android.util.Log
 import com.mdmesh.proto.IceCandidateDto
 import com.mdmesh.proto.RemoteSignalDto
+import org.webrtc.DefaultVideoDecoderFactory
+import org.webrtc.DefaultVideoEncoderFactory
+import org.webrtc.EglBase
+import org.webrtc.SoftwareVideoDecoderFactory
+import org.webrtc.SoftwareVideoEncoderFactory
+import org.webrtc.VideoDecoderFactory
+import org.webrtc.VideoEncoderFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -28,16 +41,20 @@ import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.util.concurrent.atomic.AtomicBoolean
 
+private const val TAG = "WebRtcRemoteControlSession"
+
 /**
  * Live screen-viewing [RemoteControlSession] powered by WebRTC and MediaProjection.
  */
 class WebRtcRemoteControlSession(
     private val context: Context,
     private val sendSignal: (suspend (RemoteSignalDto) -> Unit)? = null,
-    private val fetchSignals: (suspend () -> List<RemoteSignalDto>)? = null,
+    private val fetchSignals: (suspend (String) -> List<RemoteSignalDto>)? = null,
     private val mediaProjectionData: Intent? = null,
+    private val onEventLog: ((String, String?) -> Unit)? = null,
 ) : RemoteControlSession {
 
+    private var eglBase: EglBase? = null
     @Volatile private var activeSessionId: String? = null
     private val isRunning = AtomicBoolean(false)
     private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -51,6 +68,7 @@ class WebRtcRemoteControlSession(
     private var videoTrack: VideoTrack? = null
 
     override suspend fun start(sessionId: String, mode: RemoteControlSession.Mode): Result<Unit> {
+        Log.d(TAG, "Starting WebRTC remote session: $sessionId with mode: $mode")
         if (isRunning.getAndSet(true)) {
             if (activeSessionId == sessionId) return Result.success(Unit)
             stop(activeSessionId ?: "")
@@ -58,15 +76,90 @@ class WebRtcRemoteControlSession(
 
         activeSessionId = sessionId
         return runCatching {
-            initWebRtcAndStartCapture(sessionId)
-            startSignalingLoop(sessionId)
+            val intentData = mediaProjectionData ?: MediaProjectionDataStore.projectionData
+            if (intentData != null) {
+                startWebRtcWithData(sessionId, intentData)
+            } else {
+                requestPermission(sessionId)
+            }
             Unit
-        }.onFailure {
+        }.onFailure { e ->
+            Log.e(TAG, "Failed to start WebRTC remote session: $sessionId", e)
+            onEventLog?.invoke("remote.startSession", "Session start error: ${e.message}")
             stop(sessionId)
         }
     }
 
+    private fun requestPermission(sessionId: String) {
+        Log.w(TAG, "No MediaProjection data found; prompting consent activity for session: $sessionId")
+        MediaProjectionDataStore.onDataAvailable = { data ->
+            Log.d(TAG, "MediaProjection data granted by user for session: $sessionId")
+            onEventLog?.invoke("remote.startSession", "Screen capture permission granted on device")
+            startWebRtcWithData(sessionId, data)
+        }
+
+        val promptIntent = Intent(context, ScreenCapturePermissionActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        }
+
+        try {
+            context.startActivity(promptIntent)
+            Log.d(TAG, "Successfully requested ScreenCapturePermissionActivity launch for session: $sessionId")
+            onEventLog?.invoke("remote.startSession", "Launched screen capture consent prompt on device")
+        } catch (e: Throwable) {
+            Log.w(TAG, "Direct startActivity failed (${e.message}); attempting FullScreenIntent notification", e)
+            onEventLog?.invoke("remote.startSession", "Direct launch restricted, posting notification: ${e.message}")
+        }
+
+        postPermissionNotification(promptIntent)
+    }
+
+    private fun postPermissionNotification(intent: Intent) {
+        try {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channelId = "mdm_permission_prompt"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "Screen Capture Permission",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Prompts for screen capture permission"
+                }
+                manager.createNotificationChannel(channel)
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+            )
+
+            val notificationBuilder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(context, channelId)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(context)
+            }
+
+            val notification = notificationBuilder
+                .setContentTitle("Screen Sharing Requested")
+                .setContentText("Tap to grant screen viewing permission")
+                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .setFullScreenIntent(pendingIntent, true)
+                .setAutoCancel(true)
+                .build()
+
+            manager.notify(8802, notification)
+            Log.d(TAG, "Posted FullScreenIntent permission notification")
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to post permission notification", e)
+        }
+    }
+
     override suspend fun stop(sessionId: String): Result<Unit> {
+        Log.d(TAG, "Stopping WebRTC remote session: $sessionId")
         if (activeSessionId != null && activeSessionId != sessionId) {
             return Result.success(Unit)
         }
@@ -77,129 +170,160 @@ class WebRtcRemoteControlSession(
         signalingJob = null
 
         cleanupWebRtc()
+        Log.d(TAG, "WebRTC remote session stopped: $sessionId")
         return Result.success(Unit)
     }
 
     override fun isActive(): Boolean = isRunning.get() && activeSessionId != null
 
-    private fun initWebRtcAndStartCapture(sessionId: String) {
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(context)
-                .setEnableInternalTracer(false)
-                .createInitializationOptions()
-        )
+    private fun startWebRtcWithData(sessionId: String, intentData: Intent) {
+        if (!isRunning.get() || activeSessionId != sessionId) return
+        Log.d(TAG, "Starting WebRTC and ScreenCaptureService with granted MediaProjection data for session: $sessionId")
+        onEventLog?.invoke("remote.startSession", "Starting WebRTC stream with granted permission")
 
-        val factoryOptions = PeerConnectionFactory.Options()
-        factory = PeerConnectionFactory.builder()
-            .setOptions(factoryOptions)
-            .createPeerConnectionFactory()
-
-        val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-        }
-
-        val observer = object : PeerConnection.Observer {
-            override fun onIceCandidate(candidate: IceCandidate) {
-                scope.launch {
-                    val dto = RemoteSignalDto(
-                        sessionId = sessionId,
-                        type = "iceCandidate",
-                        candidate = IceCandidateDto(
-                            candidate = candidate.sdp,
-                            sdpMid = candidate.sdpMid,
-                            sdpMLineIndex = candidate.sdpMLineIndex
-                        )
-                    )
-                    runCatching { sendSignal?.invoke(dto) }
-                }
-            }
-
-            override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
-            override fun onIceConnectionReceivingChange(receiving: Boolean) {}
-            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
-            override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
-            override fun onAddStream(stream: MediaStream?) {}
-            override fun onRemoveStream(stream: MediaStream?) {}
-            override fun onDataChannel(channel: DataChannel?) {}
-            override fun onRenegotiationNeeded() {}
-            override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {}
-        }
-
-        peerConnection = factory?.createPeerConnection(rtcConfig, observer)
-            ?: throw IllegalStateException("Failed to create PeerConnection")
-
-        val intentData = mediaProjectionData ?: MediaProjectionDataStore.projectionData
-        if (intentData != null) {
+        runCatching {
             ScreenCaptureService.startService(context)
-            val screenCapturer = ScreenCapturerAndroid(intentData, object : MediaProjection.Callback() {
-                override fun onStop() {
-                    scope.launch { stop(sessionId) }
-                }
-            })
-            capturer = screenCapturer
-            surfaceTextureHelper = SurfaceTextureHelper.create("ScreenCaptureThread", null)
-            videoSource = factory?.createVideoSource(screenCapturer.isScreencast)
-            surfaceTextureHelper?.let { helper ->
-                videoSource?.let { vSource ->
-                    screenCapturer.initialize(helper, context, vSource.capturerObserver)
-                    screenCapturer.startCapture(720, 1280, 30)
-                }
-            }
-        } else {
-            // Prompt for MediaProjection capture consent via Activity
-            val promptIntent = Intent(context, ScreenCapturePermissionActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            runCatching { context.startActivity(promptIntent) }
-            videoSource = factory?.createVideoSource(true)
-        }
 
-        videoSource?.let { vSource ->
-            val vTrack = factory?.createVideoTrack("ARDAMSv0", vSource)
-            videoTrack = vTrack
-            if (vTrack != null) {
-                peerConnection?.addTrack(vTrack, listOf("ARDAMS"))
+            val egl = getEglBase(context)
+            eglBase = egl
+            factory = getOrCreateFactory(context)
+
+            val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
+                sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             }
-        }
 
-        // Create WebRTC Offer
-        val mediaConstraints = MediaConstraints().apply {
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
-        }
-
-        peerConnection?.createOffer(object : SdpObserver {
-            override fun onCreateSuccess(sdp: SessionDescription?) {
-                val localSdp = sdp ?: return
-                peerConnection?.setLocalDescription(object : SdpObserver {
-                    override fun onCreateSuccess(p0: SessionDescription?) {}
-                    override fun onSetSuccess() {
-                        scope.launch {
-                            val offerDto = RemoteSignalDto(
-                                sessionId = sessionId,
-                                type = "offer",
-                                sdp = localSdp.description
+            val observer = object : PeerConnection.Observer {
+                override fun onIceCandidate(candidate: IceCandidate) {
+                    Log.d(TAG, "Local ICE candidate gathered for session $sessionId: ${candidate.sdpMid}")
+                    onEventLog?.invoke("webrtc.ice", "Local ICE candidate gathered (${candidate.sdpMid})")
+                    scope.launch {
+                        val dto = RemoteSignalDto(
+                            sessionId = sessionId,
+                            type = "iceCandidate",
+                            candidate = IceCandidateDto(
+                                candidate = candidate.sdp,
+                                sdpMid = candidate.sdpMid,
+                                sdpMLineIndex = candidate.sdpMLineIndex
                             )
-                            runCatching { sendSignal?.invoke(offerDto) }
+                        )
+                        runCatching {
+                            sendSignal?.invoke(dto)
+                            Log.d(TAG, "Sent local ICE candidate to server for session: $sessionId")
+                        }.onFailure { e ->
+                            Log.e(TAG, "Failed to send local ICE candidate for session: $sessionId", e)
                         }
                     }
-                    override fun onCreateFailure(p0: String?) {}
-                    override fun onSetFailure(p0: String?) {}
-                }, localSdp)
+                }
+
+                override fun onSignalingChange(state: PeerConnection.SignalingState?) {
+                    Log.d(TAG, "SignalingState changed: $state")
+                    onEventLog?.invoke("webrtc.state", "SignalingState: $state")
+                }
+
+                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                    Log.d(TAG, "IceConnectionState changed: $state")
+                    onEventLog?.invoke("webrtc.state", "ICE connection state: $state")
+                }
+
+                override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+                override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
+                override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
+                override fun onAddStream(stream: MediaStream?) {}
+                override fun onRemoveStream(stream: MediaStream?) {}
+                override fun onDataChannel(channel: DataChannel?) {}
+                override fun onRenegotiationNeeded() {}
+                override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {}
             }
-            override fun onSetSuccess() {}
-            override fun onCreateFailure(p0: String?) {}
-            override fun onSetFailure(p0: String?) {}
-        }, mediaConstraints)
+
+            peerConnection = factory?.createPeerConnection(rtcConfig, observer)
+                ?: throw IllegalStateException("Failed to create PeerConnection")
+
+            // On Android 14 (API 34), ScreenCapturerAndroid creates a MediaProjection instance.
+            // A mediaProjection foreground service MUST be active and initialized before
+            // MediaProjection is created, otherwise Android throws SecurityException.
+            try {
+                setupScreenCapturer(intentData, sessionId)
+            } catch (e: Throwable) {
+                Log.e(TAG, "setupScreenCapturer error for session $sessionId: ${e.message}", e)
+                onEventLog?.invoke("webrtc.capturer", "Screen capturer error: ${e.javaClass.simpleName} - ${e.message}")
+            }
+
+            videoSource?.let { vSource ->
+                val vTrack = factory?.createVideoTrack("ARDAMSv0", vSource)
+                videoTrack = vTrack
+                if (vTrack != null) {
+                    peerConnection?.addTrack(vTrack, listOf("ARDAMS"))
+                    Log.d(TAG, "Added videoTrack to peerConnection for session: $sessionId")
+                    onEventLog?.invoke("webrtc.track", "Added videoTrack to PeerConnection")
+                }
+            }
+
+            // Create WebRTC Offer
+            val mediaConstraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
+            }
+
+            Log.d(TAG, "Creating WebRTC SDP offer for session: $sessionId")
+            peerConnection?.createOffer(object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription?) {
+                    val localSdp = sdp ?: return
+                    Log.d(TAG, "WebRTC offer created successfully for session: $sessionId")
+                    peerConnection?.setLocalDescription(object : SdpObserver {
+                        override fun onCreateSuccess(p0: SessionDescription?) {}
+                        override fun onSetSuccess() {
+                            Log.d(TAG, "Local description set successfully for session: $sessionId")
+                            onEventLog?.invoke("webrtc.offer", "Created and sent WebRTC SDP offer")
+                            scope.launch {
+                                val offerDto = RemoteSignalDto(
+                                    sessionId = sessionId,
+                                    type = "offer",
+                                    sdp = localSdp.description
+                                )
+                                runCatching {
+                                    sendSignal?.invoke(offerDto)
+                                    Log.d(TAG, "WebRTC offer sent to server for session: $sessionId")
+                                }.onFailure { e ->
+                                    Log.e(TAG, "Failed to send WebRTC offer to server for session: $sessionId", e)
+                                    onEventLog?.invoke("webrtc.offer", "Failed to send offer: ${e.message}")
+                                }
+                            }
+                        }
+                        override fun onCreateFailure(p0: String?) {
+                            Log.e(TAG, "Failed to set local SDP description for session $sessionId: $p0")
+                        }
+                        override fun onSetFailure(p0: String?) {
+                            Log.e(TAG, "Failed to set local SDP description for session $sessionId: $p0")
+                        }
+                    }, localSdp)
+                }
+                override fun onSetSuccess() {}
+                override fun onCreateFailure(p0: String?) {
+                    Log.e(TAG, "Failed to create WebRTC SDP offer for session $sessionId: $p0")
+                }
+                override fun onSetFailure(p0: String?) {
+                    Log.e(TAG, "Failed to create WebRTC SDP offer for session $sessionId: $p0")
+                }
+            }, mediaConstraints)
+
+            startSignalingLoop(sessionId)
+        }.onFailure { e ->
+            Log.e(TAG, "Error in startWebRtcWithData for session: $sessionId", e)
+            onEventLog?.invoke("remote.startSession", "Error starting WebRTC: ${e.message}")
+            scope.launch { stop(sessionId) }
+        }
     }
 
     private fun startSignalingLoop(sessionId: String) {
         val getter = fetchSignals ?: return
+        Log.d(TAG, "Starting signaling loop for session: $sessionId")
         signalingJob = scope.launch {
             while (isActive && isRunning.get()) {
-                val signals = runCatching { getter() }.getOrNull()
-                if (signals != null) {
+                val signals = runCatching { getter(sessionId) }
+                    .onFailure { e -> Log.e(TAG, "Error polling signals for session $sessionId: ${e.message}", e) }
+                    .getOrNull()
+                if (signals != null && signals.isNotEmpty()) {
+                    Log.d(TAG, "Fetched ${signals.size} signal(s) for session: $sessionId")
                     for (sig in signals) {
                         handleIncomingSignal(sig)
                     }
@@ -210,29 +334,80 @@ class WebRtcRemoteControlSession(
     }
 
     private fun handleIncomingSignal(signal: RemoteSignalDto) {
+        Log.d(TAG, "Handling incoming signal '${signal.type}' for session: ${signal.sessionId}")
         when (signal.type) {
             "answer" -> {
                 val sdpStr = signal.sdp ?: return
+                Log.d(TAG, "Setting remote SDP answer for session: ${signal.sessionId}")
+                onEventLog?.invoke("webrtc.answer", "Received remote SDP answer from browser")
                 val remoteSdp = SessionDescription(SessionDescription.Type.ANSWER, sdpStr)
                 peerConnection?.setRemoteDescription(object : SdpObserver {
                     override fun onCreateSuccess(p0: SessionDescription?) {}
-                    override fun onSetSuccess() {}
-                    override fun onCreateFailure(p0: String?) {}
-                    override fun onSetFailure(p0: String?) {}
+                    override fun onSetSuccess() {
+                        Log.d(TAG, "Remote SDP answer set successfully for session: ${signal.sessionId}")
+                        onEventLog?.invoke("webrtc.answer", "Remote SDP answer set successfully")
+                    }
+                    override fun onCreateFailure(p0: String?) {
+                        Log.e(TAG, "Failed to set remote SDP answer for session ${signal.sessionId}: $p0")
+                        onEventLog?.invoke("webrtc.answer", "Failed to set remote SDP answer: $p0")
+                    }
+                    override fun onSetFailure(p0: String?) {
+                        Log.e(TAG, "Failed to set remote SDP answer for session ${signal.sessionId}: $p0")
+                        onEventLog?.invoke("webrtc.answer", "Failed to set remote SDP answer: $p0")
+                    }
                 }, remoteSdp)
             }
             "iceCandidate" -> {
                 val cand = signal.candidate ?: return
+                Log.d(TAG, "Adding remote ICE candidate for session: ${signal.sessionId}")
+                onEventLog?.invoke("webrtc.ice", "Added remote ICE candidate (${cand.sdpMid})")
                 val iceCandidate = IceCandidate(cand.sdpMid, cand.sdpMLineIndex, cand.candidate)
                 peerConnection?.addIceCandidate(iceCandidate)
             }
             "stop" -> {
+                Log.d(TAG, "Received stop signal for session: ${signal.sessionId}")
+                onEventLog?.invoke("webrtc.stop", "Received stop signal from browser")
                 scope.launch { stop(signal.sessionId) }
             }
         }
     }
 
+    private fun setupScreenCapturer(intentData: Intent, sessionId: String) {
+        if (capturer != null) return
+        Log.d(TAG, "Starting ScreenCaptureService and MediaProjection for session: $sessionId")
+        runCatching {
+            ScreenCaptureService.startService(context)
+            val screenCapturer = ScreenCapturerAndroid(intentData, object : MediaProjection.Callback() {
+                override fun onStop() {
+                    Log.w(TAG, "MediaProjection stopped by system/user for session: $sessionId")
+                    onEventLog?.invoke("webrtc.capturer", "MediaProjection stopped by system/user")
+                    scope.launch { stop(sessionId) }
+                }
+            })
+            capturer = screenCapturer
+            val eglContext = (eglBase ?: getEglBase(context)).eglBaseContext
+            val helper = surfaceTextureHelper ?: SurfaceTextureHelper.create("ScreenCaptureThread", eglContext).also {
+                surfaceTextureHelper = it
+            }
+            val vSource = videoSource ?: factory?.createVideoSource(screenCapturer.isScreencast).also {
+                videoSource = it
+            }
+            if (vSource != null && helper != null) {
+                screenCapturer.initialize(helper, context, vSource.capturerObserver)
+                screenCapturer.startCapture(720, 1280, 30)
+                Log.d(TAG, "ScreenCapturerAndroid started capturing frames for session: $sessionId")
+                onEventLog?.invoke("webrtc.capturer", "Capturing frames (720x1280 @ 30fps)")
+            }
+        }.onFailure { e ->
+            Log.e(TAG, "Failed to initialize ScreenCapturerAndroid for session: $sessionId", e)
+            onEventLog?.invoke("webrtc.capturer", "Capturer error: ${e.javaClass.simpleName} - ${e.message}")
+        }
+    }
+
     private fun cleanupWebRtc() {
+        Log.d(TAG, "Cleaning up WebRTC resources")
+        MediaProjectionDataStore.onDataAvailable = null
+        MediaProjectionDataStore.projectionData = null
         runCatching { ScreenCaptureService.stopService(context) }
         runCatching { capturer?.stopCapture() }
         runCatching { capturer?.dispose() }
@@ -250,7 +425,56 @@ class WebRtcRemoteControlSession(
         runCatching { peerConnection?.close() }
         peerConnection = null
 
-        runCatching { factory?.dispose() }
         factory = null
+    }
+
+    companion object {
+        @Volatile private var isInitialized = false
+        @Volatile private var sharedFactory: PeerConnectionFactory? = null
+        @Volatile private var sharedEglBase: EglBase? = null
+
+        @Synchronized
+        fun ensureInitialized(context: Context) {
+            if (isInitialized) return
+            Log.i(TAG, "Initializing WebRTC PeerConnectionFactory native library...")
+            val options = PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
+                .setEnableInternalTracer(false)
+                .createInitializationOptions()
+            PeerConnectionFactory.initialize(options)
+            isInitialized = true
+            Log.i(TAG, "WebRTC PeerConnectionFactory initialized successfully")
+        }
+
+        @Synchronized
+        fun getEglBase(context: Context): EglBase {
+            ensureInitialized(context)
+            var egl = sharedEglBase
+            if (egl == null) {
+                Log.i(TAG, "Creating shared EglBase instance...")
+                egl = EglBase.create()
+                sharedEglBase = egl
+            }
+            return egl
+        }
+
+        @Synchronized
+        private fun getOrCreateFactory(context: Context): PeerConnectionFactory {
+            ensureInitialized(context)
+            var f = sharedFactory
+            if (f == null) {
+                Log.i(TAG, "Creating shared PeerConnectionFactory instance...")
+                val encoderFactory: VideoEncoderFactory = SoftwareVideoEncoderFactory()
+                val decoderFactory: VideoDecoderFactory = SoftwareVideoDecoderFactory()
+                val factoryOptions = PeerConnectionFactory.Options()
+                f = PeerConnectionFactory.builder()
+                    .setOptions(factoryOptions)
+                    .setVideoEncoderFactory(encoderFactory)
+                    .setVideoDecoderFactory(decoderFactory)
+                    .createPeerConnectionFactory()
+                sharedFactory = f
+                Log.i(TAG, "Shared PeerConnectionFactory created successfully")
+            }
+            return f
+        }
     }
 }

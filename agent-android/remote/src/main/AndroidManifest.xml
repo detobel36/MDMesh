@@ -22,7 +22,7 @@
         <activity
             android:name="com.mdmesh.remote.ScreenCapturePermissionActivity"
             android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+            android:theme="@android:style/Theme.DeviceDefault.Dialog" />
 
         <!--
             Input-injection service for remote-control "control" tier. Disabled by
