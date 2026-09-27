@@ -196,6 +196,7 @@ class WebRtcRemoteControlSession(
 
         try {
             ScreenCaptureService.startService(context)
+            onEventLog?.invoke("remote.startSession", "After ScreenCaptureService.startService(context)")
 
             val egl = getEglBase(context)
             eglBase = egl
@@ -278,6 +279,7 @@ class WebRtcRemoteControlSession(
             }
 
             Log.d(TAG, "Creating WebRTC SDP offer for session: $sessionId")
+            onEventLog?.invoke("remote.startSession", "Creating WebRTC SDP offer for session: $sessionId")
             peerConnection?.createOffer(object : SdpObserver {
                 override fun onCreateSuccess(sdp: SessionDescription?) {
                     val localSdp = sdp ?: return
@@ -304,18 +306,23 @@ class WebRtcRemoteControlSession(
                         }
                         override fun onCreateFailure(p0: String?) {
                             Log.e(TAG, "Failed to set local SDP description for session $sessionId: $p0")
+                            onEventLog?.invoke("remote.startSession", "Failed to set local SDP description for session $sessionId: $p0")
+
                         }
                         override fun onSetFailure(p0: String?) {
                             Log.e(TAG, "Failed to set local SDP description for session $sessionId: $p0")
+                            onEventLog?.invoke("remote.startSession", "Failed to set local SDP description for session $sessionId: $p0")
                         }
                     }, localSdp)
                 }
                 override fun onSetSuccess() {}
                 override fun onCreateFailure(p0: String?) {
                     Log.e(TAG, "Failed to create WebRTC SDP offer for session $sessionId: $p0")
+                    onEventLog?.invoke("remote.startSession", "Failed to create WebRTC SDP offer for session $sessionId: $p0")
                 }
                 override fun onSetFailure(p0: String?) {
                     Log.e(TAG, "Failed to create WebRTC SDP offer for session $sessionId: $p0")
+                    onEventLog?.invoke("remote.startSession", "Failed to create WebRTC SDP offer for session $sessionId: $p0")
                 }
             }, mediaConstraints)
 
