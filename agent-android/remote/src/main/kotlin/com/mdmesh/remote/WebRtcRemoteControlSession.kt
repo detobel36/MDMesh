@@ -19,6 +19,7 @@ import org.webrtc.SoftwareVideoEncoderFactory
 import org.webrtc.VideoDecoderFactory
 import org.webrtc.VideoEncoderFactory
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -69,24 +70,33 @@ class WebRtcRemoteControlSession(
 
     override suspend fun start(sessionId: String, mode: RemoteControlSession.Mode): Result<Unit> {
         Log.d(TAG, "Starting WebRTC remote session: $sessionId with mode: $mode")
-        if (isRunning.getAndSet(true)) {
-            if (activeSessionId == sessionId) return Result.success(Unit)
-            stop(activeSessionId ?: "")
-        }
+        return try {
+            if (isRunning.getAndSet(true)) {
+                if (activeSessionId == sessionId) return Result.success(Unit)
+                stop(activeSessionId ?: "")
+            }
 
-        activeSessionId = sessionId
-        return runCatching {
+            activeSessionId = sessionId
             val intentData = mediaProjectionData ?: MediaProjectionDataStore.projectionData
             if (intentData != null) {
                 startWebRtcWithData(sessionId, intentData)
             } else {
                 requestPermission(sessionId)
             }
-            Unit
-        }.onFailure { e ->
-            Log.e(TAG, "Failed to start WebRTC remote session: $sessionId", e)
-            onEventLog?.invoke("remote.startSession", "Session start error: ${e.message}")
-            stop(sessionId)
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            recordFailure("remote.startSession", "Failed to start WebRTC remote session: $sessionId", e)
+            val cleanupSessionId = activeSessionId ?: sessionId
+            try {
+                stop(cleanupSessionId)
+            } catch (cleanupError: Exception) {
+                recordFailure("remote.stopSession", "Failed to clean up session: $cleanupSessionId", cleanupError)
+                activeSessionId = null
+                isRunning.set(false)
+            }
+            Result.failure(e)
         }
     }
 
@@ -106,9 +116,12 @@ class WebRtcRemoteControlSession(
             context.startActivity(promptIntent)
             Log.d(TAG, "Successfully requested ScreenCapturePermissionActivity launch for session: $sessionId")
             onEventLog?.invoke("remote.startSession", "Launched screen capture consent prompt on device")
-        } catch (e: Throwable) {
-            Log.w(TAG, "Direct startActivity failed (${e.message}); attempting FullScreenIntent notification", e)
-            onEventLog?.invoke("remote.startSession", "Direct launch restricted, posting notification: ${e.message}")
+        } catch (e: Exception) {
+            recordFailure(
+                "remote.startSession",
+                "Direct activity launch failed; attempting FullScreenIntent notification",
+                e,
+            )
         }
 
         postPermissionNotification(promptIntent)
@@ -153,8 +166,8 @@ class WebRtcRemoteControlSession(
 
             manager.notify(8802, notification)
             Log.d(TAG, "Posted FullScreenIntent permission notification")
-        } catch (e: Throwable) {
-            Log.e(TAG, "Failed to post permission notification", e)
+        } catch (e: Exception) {
+            recordFailure("remote.startSession", "Failed to post screen capture permission notification", e)
         }
     }
 
@@ -181,7 +194,7 @@ class WebRtcRemoteControlSession(
         Log.d(TAG, "Starting WebRTC and ScreenCaptureService with granted MediaProjection data for session: $sessionId")
         onEventLog?.invoke("remote.startSession", "Starting WebRTC stream with granted permission")
 
-        runCatching {
+        try {
             ScreenCaptureService.startService(context)
 
             val egl = getEglBase(context)
@@ -307,9 +320,8 @@ class WebRtcRemoteControlSession(
             }, mediaConstraints)
 
             startSignalingLoop(sessionId)
-        }.onFailure { e ->
-            Log.e(TAG, "Error in startWebRtcWithData for session: $sessionId", e)
-            onEventLog?.invoke("remote.startSession", "Error starting WebRTC: ${e.message}")
+        } catch (e: Exception) {
+            recordFailure("remote.startSession", "Error starting WebRTC for session: $sessionId", e)
             scope.launch { stop(sessionId) }
         }
     }
@@ -317,13 +329,18 @@ class WebRtcRemoteControlSession(
     private fun startSignalingLoop(sessionId: String) {
         val getter = fetchSignals ?: return
         Log.d(TAG, "Starting signaling loop for session: $sessionId")
+        onEventLog?.invoke("webrtc.startSignalingLoop", "Starting signaling loop for session: $sessionId")
         signalingJob = scope.launch {
             while (isActive && isRunning.get()) {
                 val signals = runCatching { getter(sessionId) }
-                    .onFailure { e -> Log.e(TAG, "Error polling signals for session $sessionId: ${e.message}", e) }
+                    .onFailure { e -> {
+                        Log.e(TAG, "Error polling signals for session $sessionId: ${e.message}", e)
+                        onEventLog?.invoke("webrtc.startSignalingLoop", "Error polling signals for session $sessionId: ${e.message}")
+                    } }
                     .getOrNull()
                 if (signals != null && signals.isNotEmpty()) {
                     Log.d(TAG, "Fetched ${signals.size} signal(s) for session: $sessionId")
+                    onEventLog?.invoke("webrtc.startSignalingLoop", "Fetched ${signals.size} signal(s) for session: $sessionId")
                     for (sig in signals) {
                         handleIncomingSignal(sig)
                     }
@@ -335,6 +352,7 @@ class WebRtcRemoteControlSession(
 
     private fun handleIncomingSignal(signal: RemoteSignalDto) {
         Log.d(TAG, "Handling incoming signal '${signal.type}' for session: ${signal.sessionId}")
+        onEventLog?.invoke("webrtc.handleIncomingSignal", "Handling incoming signal '${signal.type}' for session: ${signal.sessionId}")
         when (signal.type) {
             "answer" -> {
                 val sdpStr = signal.sdp ?: return
@@ -375,6 +393,7 @@ class WebRtcRemoteControlSession(
     private fun setupScreenCapturer(intentData: Intent, sessionId: String) {
         if (capturer != null) return
         Log.d(TAG, "Starting ScreenCaptureService and MediaProjection for session: $sessionId")
+        onEventLog?.invoke("webrtc.setupScreenCapturer", "Starting ScreenCaptureService and MediaProjection for session: $sessionId")
         runCatching {
             ScreenCaptureService.startService(context)
             val screenCapturer = ScreenCapturerAndroid(intentData, object : MediaProjection.Callback() {
@@ -399,8 +418,16 @@ class WebRtcRemoteControlSession(
                 onEventLog?.invoke("webrtc.capturer", "Capturing frames (720x1280 @ 30fps)")
             }
         }.onFailure { e ->
-            Log.e(TAG, "Failed to initialize ScreenCapturerAndroid for session: $sessionId", e)
-            onEventLog?.invoke("webrtc.capturer", "Capturer error: ${e.javaClass.simpleName} - ${e.message}")
+            recordFailure("webrtc.capturer", "Failed to initialize screen capturer for session: $sessionId", e)
+        }
+    }
+
+    private fun recordFailure(type: String, message: String, error: Throwable) {
+        Log.e(TAG, message, error)
+        try {
+            onEventLog?.invoke(type, "$message\n${error.stackTraceToString()}")
+        } catch (loggingError: Exception) {
+            Log.e(TAG, "Failed to save remote-session error to EventLog", loggingError)
         }
     }
 
