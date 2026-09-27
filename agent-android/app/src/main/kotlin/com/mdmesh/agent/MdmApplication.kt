@@ -28,9 +28,18 @@ class MdmApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         setupUncaughtExceptionHandler()
+        initializeWebRtcEarly()
         CheckInWorker.schedule(this)   // periodic reconcile (WorkManager floor)
         CheckInWorker.scheduleNow(this) // prompt check-in on every cold start (post-install/reboot)
         WakeKeepAlive.schedule(this)   // doze-proof reconcile heartbeat
+    }
+
+    private fun initializeWebRtcEarly() {
+        try {
+            com.mdmesh.remote.WebRtcRemoteControlSession.ensureInitialized(this)
+        } catch (e: Throwable) {
+            android.util.Log.e("MdmApplication", "Failed to early-initialize WebRTC: ${e.message}", e)
+        }
     }
 
     private fun setupUncaughtExceptionHandler() {

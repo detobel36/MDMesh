@@ -434,7 +434,7 @@ class WebRtcRemoteControlSession(
         @Volatile private var sharedEglBase: EglBase? = null
 
         @Synchronized
-        private fun ensureInitialized(context: Context) {
+        fun ensureInitialized(context: Context) {
             if (!isInitialized) {
                 try {
                     PeerConnectionFactory.initialize(
