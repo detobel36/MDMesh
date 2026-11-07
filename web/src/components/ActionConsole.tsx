@@ -5,6 +5,7 @@ import {
 } from '../api/commands';
 import { useToast } from '../ui/toast';
 import { KioskEnterModal } from './KioskEnterModal';
+import { ScreenViewModal } from './ScreenViewModal';
 
 type Device = { number: string };
 
@@ -23,6 +24,7 @@ export function ActionConsole({ device }: { device: Device }) {
   const [confirmText, setConfirmText] = useState('');
   const [busy, setBusy] = useState(false);
   const [kioskOpen, setKioskOpen] = useState(false);
+  const [screenViewOpen, setScreenViewOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     const [st, hist] = await Promise.all([
@@ -72,6 +74,7 @@ export function ActionConsole({ device }: { device: Device }) {
     (t.params && t.params.length > 0) || !!t.confirm;
 
   async function onClick(t: CommandTemplateExt) {
+    if (t.key === 'view-screen') { setScreenViewOpen(true); return; }
     if (t.key === 'kiosk-enter') { setKioskOpen(true); return; }
     if (needsModal(t)) { start(t); return; }
     await send(t, {});
@@ -94,13 +97,22 @@ export function ActionConsole({ device }: { device: Device }) {
     <div className="panel">
       <div className="panel-head">
         <h2 className="panel-title">Device control</h2>
-        <button
-          className="btn"
-          disabled={busy}
-          onClick={() => { void forceSync(device.number).then(refresh).catch(() => undefined); }}
-        >
-          Sync now
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            className="btn btn-primary"
+            disabled={busy}
+            onClick={() => setScreenViewOpen(true)}
+          >
+            View Screen
+          </button>
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => { void forceSync(device.number).then(refresh).catch(() => undefined); }}
+          >
+            Sync now
+          </button>
+        </div>
       </div>
 
       <DeviceStatePanel state={state} />
@@ -125,6 +137,13 @@ export function ActionConsole({ device }: { device: Device }) {
       ))}
 
       <CommandTimeline items={history} />
+
+      {screenViewOpen && (
+        <ScreenViewModal
+          deviceNumber={device.number}
+          onClose={() => setScreenViewOpen(false)}
+        />
+      )}
 
       {kioskOpen && (
         <KioskEnterModal

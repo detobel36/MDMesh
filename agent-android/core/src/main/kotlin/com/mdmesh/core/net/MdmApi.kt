@@ -31,4 +31,19 @@ interface MdmApi {
         @Header("Authorization") authorization: String,
         @Body request: AgentCheckInRequest,
     ): ResponseEnvelope<AgentCheckInResponse>
+
+    /** Post a WebRTC SDP/ICE signal or session status update to the server for a remote viewing session. */
+    @POST("rest/public/agent/v1/remote/session/{sessionId}/signal")
+    suspend fun sendRemoteSignal(
+        @Header("Authorization") authorization: String,
+        @retrofit2.http.Path("sessionId") sessionId: String,
+        @Body signal: com.mdmesh.proto.RemoteSignalDto,
+    ): ResponseEnvelope<Unit>
+
+    /** Poll pending WebRTC signals (e.g. SDP answer, ICE candidates) sent by the browser. */
+    @retrofit2.http.GET("rest/public/agent/v1/remote/session/{sessionId}/signals")
+    suspend fun getRemoteSignals(
+        @Header("Authorization") authorization: String,
+        @retrofit2.http.Path("sessionId") sessionId: String,
+    ): ResponseEnvelope<List<com.mdmesh.proto.RemoteSignalDto>>
 }

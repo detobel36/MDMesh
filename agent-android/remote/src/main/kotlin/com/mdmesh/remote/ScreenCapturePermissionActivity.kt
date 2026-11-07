@@ -1,0 +1,41 @@
+package com.mdmesh.remote
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.media.projection.MediaProjectionManager
+import android.os.Bundle
+
+/**
+ * Transparent activity that requests MediaProjection screen capture consent from user/admin
+ * and stores the granted Intent for [WebRtcRemoteControlSession].
+ */
+class ScreenCapturePermissionActivity : Activity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_CODE)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQUEST_CODE) {
+            if (resultCode == RESULT_OK && data != null) {
+                ScreenCaptureService.startService(this)
+                MediaProjectionDataStore.projectionData = data
+            }
+            finish()
+        } else {
+            super.onActivityResult(requestCode, resultCode, data)
+        }
+    }
+
+    companion object {
+        private const val REQUEST_CODE = 9901
+    }
+}
+
+object MediaProjectionDataStore {
+    @Volatile
+    var projectionData: Intent? = null
+}

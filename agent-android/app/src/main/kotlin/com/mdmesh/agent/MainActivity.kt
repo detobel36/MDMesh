@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.mdmesh.agent.service.CheckInService
 import com.mdmesh.core.config.ServerConfigStore
+import com.mdmesh.core.sync.CheckInWorker
 import com.mdmesh.core.kiosk.KioskApplier
 import com.mdmesh.core.store.ConfigStateStore
 import com.mdmesh.core.store.DeviceIdStore
@@ -183,6 +184,18 @@ class MainActivity : ComponentActivity() {
                 mono = true,
             ),
         )
+        val checkUpdateBtn = Button(this).apply {
+            text = "Check for updates"
+            setOnClickListener {
+                CheckInWorker.scheduleNow(applicationContext)
+                ContextCompat.startForegroundService(
+                    this@MainActivity,
+                    Intent(this@MainActivity, CheckInService::class.java),
+                )
+                refresh()
+            }
+        }
+        root.addView(checkUpdateBtn)
         root.addView(spacer())
 
         root.addView(label("SERVER"))
