@@ -266,6 +266,20 @@ class KioskApplierTest {
         assertEquals(true, store.load()?.features?.lockVolume)
     }
 
+    @Test fun `re-enable kiosk using stored payload or default payload`() = runTest {
+        val c = FakeController(KioskResult.Ok); val h = FakeHome(); val store = InMemoryKioskStateStore()
+        val applier = KioskApplier(c, store, h, home) { false }
+
+        val saved = KioskApplyPayload(mode = "launcher", allowedPackages = listOf("com.example.app"))
+        store.save(saved)
+
+        val reEnabledPayload = store.load() ?: KioskApplyPayload()
+        val r = applier.enter(reEnabledPayload)
+        assertEquals(KioskResult.Ok, r)
+        assertEquals(listOf("com.example.app"), c.entered)
+        assertTrue(applier.isPersisted())
+    }
+
     @Test fun `exit clears store and returns to oem home`() = runTest {
         val h = FakeHome(); val store = InMemoryKioskStateStore(); store.save(KioskApplyPayload())
         val a = KioskApplier(FakeController(KioskResult.Ok), store, h, home) { false }
