@@ -8,6 +8,8 @@ line under Unreleased.
 
 ## Unreleased
 
+## v0.4.1 — 2026-11-11
+
 Upgrading
 - The database adds three columns (`devices.wipedAt`, `configurations.camera`, `configurations.locationServices`) on
   start. Devices wiped before the update aren't marked.
