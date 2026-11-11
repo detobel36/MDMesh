@@ -12,6 +12,7 @@ import { getConfigStatus, summarizeStatus, type ConfigStatus } from '../api/conf
 import {
   forceSync,
   getDeviceState,
+  installApp,
   listCommandHistory,
   queueCommand,
   syncConfigApps,
@@ -20,6 +21,7 @@ import {
   type DeviceState,
   type QueueCommandRequest,
 } from '../api/commands';
+import { getUpdateStatus, type UpdateStatus } from '../api/updates';
 import { getEvents, type DeviceEvent } from '../api/events';
 import { listLocations, type LocationFix } from '../api/deviceLocations';
 import { getConfiguration, getConfigurationApps, type ConfigApp, type Configuration } from '../api/configurations';
@@ -251,6 +253,7 @@ export function DeviceDetailPage() {
   const [dsLoaded, setDsLoaded] = useState(false);
   const [cfgStatus, setCfgStatus] = useState<ConfigStatus | null>(null);
   const [cfgLoaded, setCfgLoaded] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [history, setHistory] = useState<CommandHistoryItem[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [events, setEvents] = useState<DeviceEvent[]>([]);
@@ -431,6 +434,12 @@ export function DeviceDetailPage() {
             setEventsLoaded(true);
           })
           .catch(() => undefined),
+        getUpdateStatus()
+          .then((v) => {
+            if (!on) return;
+            setUpdateStatus(v);
+          })
+          .catch(() => undefined),
       ]);
       running = false;
       if (!on) return;
@@ -591,6 +600,31 @@ export function DeviceDetailPage() {
       else toast.push('ok', 'Sync requested', '');
     } catch (e) {
       toast.push('err', 'Sync failed', e instanceof Error ? e.message : '');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Push the agent APK the supervisor mirrors for the latest release (fork feature: manual agent update). */
+  async function updateAgent() {
+    if (!number || !updateStatus?.apk?.available) return;
+    const apk = updateStatus.apk;
+    const pkg = (import.meta.env.VITE_AGENT_PACKAGE as string | undefined) || 'com.mdmesh.agent';
+    setBusy(true);
+    try {
+      const url = `${window.location.origin}/update/agent.apk?v=${apk.versionCode}`;
+      await installApp(number, {
+        url,
+        packageName: pkg,
+        versionCode: apk.versionCode,
+        sha256: apk.sha256,
+        runAfterInstall: false,
+      });
+      await forceSync(number).catch(() => undefined);
+      toast.push('ok', 'Agent update queued', `Updating agent to v${apk.version}`);
+      refresh();
+    } catch (e) {
+      toast.push('err', 'Agent update failed', e instanceof Error ? e.message : '');
     } finally {
       setBusy(false);
     }
@@ -898,7 +932,21 @@ export function DeviceDetailPage() {
   const managementItems: KeyValueItem[] = [
     { key: 'cfg', label: 'Configuration', value: configName ?? DASH },
     // The agent's own report only: device.launcherVersion is the configuration's main-app version.
-    { key: 'agent', label: 'Agent', value: ds?.agentVersion || DASH, mono: !!ds?.agentVersion },
+    {
+      key: 'agent',
+      label: 'Agent',
+      value: (
+        <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <span>{ds?.agentVersion || DASH}</span>
+          {updateStatus?.apk?.available ? (
+            <Button size="xs" onClick={() => void updateAgent()} disabled={busy}>
+              Update to v{updateStatus.apk.version}
+            </Button>
+          ) : null}
+        </span>
+      ),
+      mono: false,
+    },
     { key: 'mdm', label: 'MDM mode', value: ownerSource == null ? DASH : ownerSource ? 'Device owner' : 'Not device owner' },
     { key: 'enrolled', label: 'Enrolled', value: device.enrollTime ? fmtDateTime(device.enrollTime) : DASH },
   ];

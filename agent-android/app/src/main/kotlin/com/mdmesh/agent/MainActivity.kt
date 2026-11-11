@@ -224,6 +224,19 @@ class MainActivity : ComponentActivity() {
                 mono = true,
             ),
         )
+        val checkUpdateBtn = Button(this).apply {
+            text = "Check for updates"
+            isAllCaps = false
+            setOnClickListener {
+                CheckInWorker.scheduleNow(applicationContext)
+                ContextCompat.startForegroundService(
+                    this@MainActivity,
+                    Intent(this@MainActivity, CheckInService::class.java),
+                )
+                refresh()
+            }
+        }
+        root.addView(checkUpdateBtn)
         root.addView(spacer())
 
         root.addView(label("SERVER"))
