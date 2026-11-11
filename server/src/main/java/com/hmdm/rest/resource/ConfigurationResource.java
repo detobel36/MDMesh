@@ -44,10 +44,16 @@ import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
 import io.swagger.annotations.Authorization;
 import com.hmdm.rest.json.Response;
+import org.glassfish.jersey.media.multipart.FormDataContentDisposition;
+import org.glassfish.jersey.media.multipart.FormDataParam;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
+import java.io.InputStream;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Api(tags = {"Configuration"}, authorizations = {@Authorization("Bearer Token")})
@@ -62,6 +68,8 @@ public class ConfigurationResource {
     private PushService pushService;
     private CustomerDAO customerDAO;
     private UserDAO userDAO;
+    private UploadedFileDAO uploadedFileDAO;
+    private String filesDirectory;
     private String baseUrl;
     private ExtensionPoints extensionPoints;
 
@@ -77,6 +85,8 @@ public class ConfigurationResource {
                                  PushService pushService,
                                  CustomerDAO customerDAO,
                                  UserDAO userDAO,
+                                 UploadedFileDAO uploadedFileDAO,
+                                 @Named("files.directory") String filesDirectory,
                                  @Named("base.url") String baseUrl,
                                  ExtensionPoints extensionPoints) {
         this.configurationDAO = configurationDAO;
@@ -84,6 +94,8 @@ public class ConfigurationResource {
         this.pushService = pushService;
         this.customerDAO = customerDAO;
         this.userDAO = userDAO;
+        this.uploadedFileDAO = uploadedFileDAO;
+        this.filesDirectory = filesDirectory;
         this.baseUrl = baseUrl;
         this.extensionPoints = extensionPoints;
     }
@@ -106,6 +118,92 @@ public class ConfigurationResource {
         List<Configuration> configurations = this.configurationDAO.getAllConfigurations();
         configurations.forEach(c -> c.setBaseUrl(this.configurationDAO.getBaseUrl()));
         return Response.OK(configurations);
+    }
+
+    // =================================================================================================================
+    @ApiOperation(
+            value = "Upload configuration background image",
+            notes = "Uploads background image for a configuration and returns its public URL",
+            response = String.class
+    )
+    @POST
+    @Path("/background")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response uploadBackgroundImage(@FormDataParam("file") InputStream uploadedInputStream,
+                                          @FormDataParam("file") FormDataContentDisposition fileDetail,
+                                          @FormDataParam("configurationName") String configurationName) {
+        if (!SecurityContext.get().hasPermission("configurations")) {
+            log.error("Unauthorized attempt to upload background image by user " +
+                    SecurityContext.get().getCurrentUserName());
+            return Response.PERMISSION_DENIED();
+        }
+        if (uploadedInputStream == null || fileDetail == null) {
+            return Response.ERROR("error.file.save");
+        }
+        try {
+            return SecurityContext.get().getCurrentCustomerId().map(customerId -> {
+                Customer customer = customerDAO.findById(customerId);
+                File customerFilesDirectory = FileUtil.resolveFile(customer, filesDirectory, null, "");
+                if (!customerFilesDirectory.exists()) {
+                    customerFilesDirectory.mkdirs();
+                }
+
+                String configName = (configurationName != null && !configurationName.trim().isEmpty())
+                        ? configurationName.trim()
+                        : "default";
+                String adjustedName = FileUtil.adjustFileName(configName);
+
+                String ext = ".png";
+                String originalFileName = fileDetail.getFileName();
+                if (originalFileName != null && originalFileName.contains(".")) {
+                    String fileExt = originalFileName.substring(originalFileName.lastIndexOf('.')).toLowerCase();
+                    if (fileExt.matches("^\\.(png|jpg|jpeg|gif|webp|svg)$")) {
+                        ext = fileExt;
+                    }
+                }
+
+                // Delete previous background image files for this configuration name
+                File[] existingBgFiles = customerFilesDirectory.listFiles((dir, name) -> name.startsWith("bg_" + adjustedName + "."));
+                if (existingBgFiles != null) {
+                    for (File f : existingBgFiles) {
+                        try {
+                            f.delete();
+                            UploadedFile oldFile = uploadedFileDAO.getByPath(customer.getId(), f.getName());
+                            if (oldFile != null) {
+                                uploadedFileDAO.remove(oldFile.getId());
+                            }
+                        } catch (Exception e) {
+                            log.warn("Failed to delete old background file {}", f.getName(), e);
+                        }
+                    }
+                }
+
+                String targetFileName = "bg_" + adjustedName + ext;
+                File targetFile = new File(customerFilesDirectory, targetFileName);
+                FileUtil.writeToFile(uploadedInputStream, targetFile.getAbsolutePath());
+
+                UploadedFile uploadedFile = uploadedFileDAO.getByPath(customer.getId(), targetFileName);
+                if (uploadedFile == null) {
+                    uploadedFile = new UploadedFile();
+                    uploadedFile.setCustomerId(customer.getId());
+                    uploadedFile.setFilePath(targetFileName);
+                    uploadedFile.setUploadTime(System.currentTimeMillis());
+                    uploadedFileDAO.insert(uploadedFile);
+                } else {
+                    uploadedFile.setUploadTime(System.currentTimeMillis());
+                    uploadedFileDAO.update(uploadedFile);
+                }
+
+                String url = FileUtil.createFileUrl(this.baseUrl, customer.getFilesDir(), targetFileName);
+                Map<String, String> result = new HashMap<>();
+                result.put("url", url);
+                return Response.OK(result);
+            }).orElse(Response.PERMISSION_DENIED());
+        } catch (Exception e) {
+            log.error("Unexpected error when uploading background image", e);
+            return Response.INTERNAL_ERROR();
+        }
     }
 
     // =================================================================================================================
