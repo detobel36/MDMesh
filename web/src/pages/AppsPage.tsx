@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { Application } from '../api/applications';
-import { IconAndroid, IconLibrary, IconUpload, LinkTabs, PageHeader, useToast } from '../ui';
+import { IconAndroid, IconApps, IconLibrary, IconUpload, LinkTabs, PageHeader, useToast } from '../ui';
 import { AppsCustom } from './AppsCustom';
 import { canDeploy, resolveApp, type DeployModes, type DeploySubject } from '../data/apps';
 import { DeployModal } from '../ui/DeployModal';
@@ -10,13 +10,15 @@ import { usePermission } from '../ext/permissions';
 import { paths } from '../routes';
 import { AppsFdroid } from './AppsFdroid';
 import { AppsLibrary } from './AppsLibrary';
+import { AppsPackage } from './AppsPackage';
 import { errorText, useLibrary, useUsedIn, type Sources } from './appsModel';
 import './AppsPage.css';
 
-type SourceId = 'library' | 'custom' | 'fdroid';
+type SourceId = 'library' | 'pkg' | 'custom' | 'fdroid';
 
 /** The tab a link asks for; the Library when it asks for none, or for one the role doesn't see. */
-function sourceFrom(param: string | null, sources: Sources): SourceId {
+function sourceFrom(param: string | null, sources: Sources, canAddPackage: boolean): SourceId {
+  if (param === 'pkg' && canAddPackage) return 'pkg';
   return (param === 'custom' || param === 'fdroid') && sources[param] ? param : 'library';
 }
 
@@ -40,7 +42,7 @@ export function AppsPage() {
   // alone is hosted, but reaches neither the library nor a device.
   const canAdd = usePermission(CORE_ACTION_ACCESS.addApp);
   const sources: Sources = { custom: canAdd || mayDeploy, fdroid: canAdd || mayDeploy };
-  const source = sourceFrom(params.get('source'), sources);
+  const source = sourceFrom(params.get('source'), sources, canAdd);
   const [deploy, setDeploy] = useState<DeploySubject | null>(null);
   const [deployingId, setDeployingId] = useState<number | null>(null);
   const { usedIn, invalidate: invalidateUsedIn } = useUsedIn(library.apps, source === 'library');
@@ -98,6 +100,9 @@ export function AppsPage() {
           count: library.apps ? library.apps.length : undefined,
           active: source === 'library',
         },
+        ...(canAdd
+          ? [{ key: 'pkg', to: `${paths.apps}?source=pkg`, label: 'Package name', icon: <IconApps />, active: source === 'pkg' }]
+          : []),
         ...(sources.custom
           ? [{ key: 'custom', to: `${paths.apps}?source=custom`, label: 'Custom APK', icon: <IconUpload />, active: source === 'custom' }]
           : []),
@@ -121,6 +126,8 @@ export function AppsPage() {
           deployingId={deployingId}
           usedIn={usedIn}
         />
+      ) : source === 'pkg' ? (
+        <AppsPackage onLibraryChanged={library.reload} />
       ) : source === 'custom' ? (
         <AppsCustom
           tabs={tabs}

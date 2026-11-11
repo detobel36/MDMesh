@@ -1,9 +1,12 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  createIcon,
   deleteApplication,
   getAppConfigLinks,
   getVersions,
+  saveAndroidApplication,
   setVersionSha256,
+  uploadIconFile,
   type Application,
   type ApplicationVersion,
 } from '../api/applications';
@@ -91,6 +94,7 @@ export function AppsLibrary({
   const [filter, setFilter] = useState<SourceFilter>('all');
   const [removing, setRemoving] = useState<number | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<Application | null>(null);
+  const [editing, setEditing] = useState<Application | null>(null);
   const [shaFor, setShaFor] = useState<{ app: Application; version: ApplicationVersion } | null>(null);
   // Only extension columns sort (core's never did): null until one is picked.
   const [sort, setSort] = useState<{ key: string; dir: SortDir } | null>(null);
@@ -114,8 +118,12 @@ export function AppsLibrary({
   // The row menu's entry and the missing-checksum notice open the same dialog, so both follow this one check.
   const maySetChecksum = usePermission(CORE_ACTION_ACCESS.setAppChecksum);
   const mayUpload = usePermission(CORE_ACTION_ACCESS.uploadFile);
+  // PUT /private/applications/android checks edit_applications, like adding an app: the same permission edits it.
+  const mayEdit = usePermission(CORE_ACTION_ACCESS.addApp);
   const canEditSha = (a: Application) => maySetChecksum && !!a.url && !sourceOf(a, baseUrl).hosted && !a.commonApplication;
   const canRemove = (a: Application) => !a.commonApplication || !!user?.superAdmin;
+  // A common (master-customer) app is only editable by a super-admin, exactly like removing it.
+  const canEditApp = (a: Application) => mayEdit && (!a.commonApplication || !!user?.superAdmin);
 
   // An APK MDMesh doesn't host installs only with a known SHA-256: set it on the version the app installs.
   async function editSha256(app: Application) {
@@ -191,6 +199,11 @@ export function AppsLibrary({
     const items = rowMenu.items(a);
     return (
       <div className="v2-apps-lib__actions">
+        {canEditApp(a) ? (
+          <Button size="xs" onClick={() => setEditing(a)} aria-label={`Edit ${a.name}`}>
+            Edit
+          </Button>
+        ) : null}
         {onDeploy ? (
           <Button
             size="xs"
@@ -210,7 +223,12 @@ export function AppsLibrary({
 
   const appCell = (a: Application) => (
     <div className="v2-apps-lib__app">
-      <AppTile name={a.name} size={38} tone={sourceOf(a, baseUrl).kind === 'fdroid' ? 'neutral' : 'ink'} />
+      <AppTile
+        name={a.name}
+        size={38}
+        tone={sourceOf(a, baseUrl).kind === 'fdroid' ? 'neutral' : 'ink'}
+        src={a.icon}
+      />
       <span className="v2-apps-lib__names">
         <span className="v2-apps-lib__name">{a.name}</span>
         <span className="v2-apps-lib__pkg">{a.pkg}</span>
@@ -462,7 +480,142 @@ export function AppsLibrary({
           still uses. It does not uninstall the app from enrolled devices.
         </p>
       </Modal>
+
+      {editing ? (
+        <EditAppDialog
+          app={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(updated) => {
+            setApps((cur) => cur.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
+            setEditing(null);
+            reload();
+          }}
+        />
+      ) : null}
     </>
+  );
+}
+
+/** Edit a library app's name, package, version and icon (fork feature: PUT /private/applications/android). */
+function EditAppDialog({
+  app,
+  onClose,
+  onSaved,
+}: {
+  app: Application;
+  onClose: () => void;
+  onSaved: (app: Application) => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState(app.name ?? '');
+  const [pkg, setPkg] = useState(app.pkg ?? '');
+  const [version, setVersion] = useState(app.version ?? '');
+  const [iconId, setIconId] = useState<number | undefined>(app.iconId);
+  const [iconPreview, setIconPreview] = useState<string | undefined>(app.icon);
+  const [uploadingIcon, setUploadingIcon] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function changeIcon(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingIcon(true);
+    try {
+      const upFile = await uploadIconFile(file);
+      if (!upFile.id) throw new Error('File upload failed');
+      const iconRec = await createIcon({ name: file.name, fileId: upFile.id });
+      setIconId(iconRec.id);
+      setIconPreview(URL.createObjectURL(file));
+      toast.push('ok', 'Picture uploaded', 'New icon ready.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('icon.dimension.invalid') || msg.includes('dimension')) {
+        toast.push('err', 'Invalid image', 'Icon image must be square (width equals height).');
+      } else {
+        toast.push('err', 'Upload failed', msg || 'Could not upload the icon image.');
+      }
+    } finally {
+      setUploadingIcon(false);
+      e.target.value = '';
+    }
+  }
+
+  async function save() {
+    if (!name.trim() || !pkg.trim()) {
+      toast.push('err', 'Missing fields', 'Name and package name are required.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const saved = await saveAndroidApplication({
+        ...app,
+        name: name.trim(),
+        pkg: pkg.trim(),
+        version: version.trim() || undefined,
+        iconId,
+      });
+      toast.push('ok', 'Application saved', name.trim());
+      onSaved(saved);
+    } catch (e) {
+      toast.push('err', 'Save failed', e instanceof Error ? e.message : 'Could not save the application.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={() => !busy && !uploadingIcon && onClose()}
+      dismissOnBackdrop={false}
+      title="Edit application"
+      description="Change how this app appears in the library. The package name is what devices match."
+      footer={
+        <>
+          <Button size="lg" onClick={onClose} disabled={busy || uploadingIcon}>
+            Cancel
+          </Button>
+          <Button size="lg" variant="primary" type="submit" form="v2-apps-edit" disabled={busy || uploadingIcon}>
+            {busy ? 'Saving…' : 'Save'}
+          </Button>
+        </>
+      }
+    >
+      <form
+        id="v2-apps-edit"
+        className="v2-apps-editform"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <div className="v2-apps-editform__icon">
+          <AppTile name={name || 'App'} size={44} tone="ink" src={iconPreview} />
+          <div>
+            <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingIcon || busy}>
+              {uploadingIcon ? 'Uploading…' : 'Change picture'}
+            </Button>
+            <p className="v2-apps-editform__hint">Square PNG or JPG image.</p>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => void changeIcon(e)}
+          />
+        </div>
+        <Field label="Name *">
+          <Input value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="Package *">
+          <Input mono value={pkg} onChange={(e) => setPkg(e.target.value)} />
+        </Field>
+        <Field label="Version">
+          <Input value={version} onChange={(e) => setVersion(e.target.value)} />
+        </Field>
+      </form>
+    </Modal>
   );
 }
 
