@@ -337,7 +337,7 @@ describe.each([
   { role: 'Observer', user: ROLES.observer, tabs: ['Library'] },
   { role: 'edit_files alone', user: custom(['applications', 'edit_files']), tabs: ['Library'] },
   { role: 'edit_devices alone', user: custom(['applications', 'edit_devices']), tabs: ['Library', 'Custom APK', 'F-Droid'] },
-  { role: 'edit_applications alone', user: custom(['applications', 'edit_applications']), tabs: ['Library', 'Custom APK', 'F-Droid'] },
+  { role: 'edit_applications alone', user: custom(['applications', 'edit_applications']), tabs: ['Library', 'Package name', 'Custom APK', 'F-Droid'] },
 ])('Apps source tabs as $role', ({ user, tabs }) => {
   const tabBar = () => within(main().getByRole('navigation', { name: 'App source' }));
 
