@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import type { Application } from '../../api/applications';
-import type { ConfigApp } from '../../api/configurations';
+import { uploadBackgroundImage, type ConfigApp } from '../../api/configurations';
 import { DEFAULT_SEGMENTS, flagOffValue, type FieldDef } from '../../data/configFields';
 import { appNameForVersionId, versionIdForApp } from '../../data/configurationRules';
 import {
@@ -15,6 +15,7 @@ import {
   Toggle,
   TriState,
   TwoState,
+  useToast,
   type InputTone,
 } from '../../ui';
 
@@ -30,6 +31,8 @@ export interface ControlProps {
   /** For `app` fields: the choices and the configuration's assigned apps (to resolve version ids). */
   apps?: Application[];
   assigned?: ConfigApp[];
+  /** Configuration name, needed to upload the background picture of `backgroundImageUrl`. */
+  configName?: string;
   tone?: InputTone;
 }
 
@@ -54,9 +57,98 @@ const SEGMENTED_ENUMS: ReadonlySet<string> = new Set(['iconSize', 'requestUpdate
 /** Text-like change: emptying a field whose stored value was null keeps null, so it doesn't count as a change. */
 const textValue = (v: string, stored: unknown) => (v === '' && stored == null ? stored : v);
 
+/**
+ * Background picture URL with an Upload button (fork feature): the file is uploaded for this configuration and the
+ * returned public URL fills the field. Emptied text keeps a stored null (so it does not count as a change).
+ */
+function BackgroundImageInput({
+  value,
+  stored,
+  disabled,
+  configName,
+  onChange,
+  ...aria
+}: {
+  value: unknown;
+  stored: unknown;
+  disabled?: boolean;
+  configName?: string;
+  onChange: (v: unknown) => void;
+  'aria-labelledby'?: string;
+  'aria-describedby'?: string;
+}) {
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const name = (configName ?? '').trim();
+    if (!name) {
+      toast.push('err', 'Name required', 'Enter a configuration name before uploading a background picture.');
+      e.target.value = '';
+      return;
+    }
+    setUploading(true);
+    try {
+      const res = await uploadBackgroundImage(file, name);
+      onChange(res.url);
+      toast.push('ok', 'Background uploaded', 'The picture is set as this configuration’s background.');
+    } catch (err) {
+      toast.push('err', 'Upload failed', err instanceof Error ? err.message : 'Could not upload the picture.');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+      <Input
+        {...aria}
+        className="v2-cfged-ctl"
+        size="sm"
+        type="text"
+        value={value == null ? '' : String(value)}
+        disabled={disabled}
+        placeholder="https://… or upload a picture"
+        onChange={(e) => onChange(e.target.value === '' && stored == null ? stored : e.target.value)}
+        style={{ flex: 1 }}
+      />
+      {!disabled && (
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={(e) => void onFile(e)}
+          />
+          <Button size="sm" disabled={uploading} onClick={() => fileRef.current?.click()}>
+            {uploading ? 'Uploading…' : 'Upload picture'}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** The control for one configuration field, by its configFields type. */
-export function FieldControl({ def, value, stored, onChange, disabled, labelId, helpId, apps = [], assigned = [], tone }: ControlProps) {
+export function FieldControl({ def, value, stored, onChange, disabled, labelId, helpId, apps = [], assigned = [], configName, tone }: ControlProps) {
   const aria = { 'aria-labelledby': labelId, 'aria-describedby': helpId };
+  if (def.key === 'backgroundImageUrl') {
+    return (
+      <BackgroundImageInput
+        {...aria}
+        value={value}
+        stored={stored}
+        disabled={disabled}
+        configName={configName}
+        onChange={onChange}
+      />
+    );
+  }
   switch (def.type) {
     case 'switch':
       return <Toggle {...aria} checked={value === true} disabled={disabled} onChange={(v) => onChange(v)} />;

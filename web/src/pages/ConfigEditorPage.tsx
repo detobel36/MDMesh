@@ -597,6 +597,7 @@ function Editor({
             helpId={helpId}
             apps={apps}
             assigned={allowed}
+            configName={draft.name}
             tone={showPinWarn ? 'warn' : undefined}
           />
         )}

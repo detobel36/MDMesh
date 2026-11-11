@@ -14,7 +14,7 @@ class KioskPayloadTest {
             features = KioskFeaturesDto(home = true, lockButtons = false),
             exitMode = "gesture",
             password = "1234",
-            theme = KioskThemeDto("#000000", "#ffffff", "SMALL"),
+            theme = KioskThemeDto("#000000", "#ffffff", "https://example.com/bg.png", "SMALL"),
         )
         val json = ProtocolJson.json.encodeToString(KioskApplyPayload.serializer(), p)
         assertEquals(p, ProtocolJson.json.decodeFromString(KioskApplyPayload.serializer(), json))

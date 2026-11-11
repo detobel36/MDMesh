@@ -36,5 +36,6 @@ import lombok.Setter;
 public class DesiredKioskTheme {
     private String backgroundColor;
     private String textColor;
+    private String backgroundImageUrl;
     private String iconSize;
 }
