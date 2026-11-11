@@ -1,0 +1,97 @@
+/*
+ * Utility styles for the fork's "Fetch from devices" modal, whose markup predates the v2
+ * design system. Scoped to that dialog: upstream components use the `v2-` classes instead.
+ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 7px 12px;
+  border: 1px solid #d5d9e0;
+  border-radius: 8px;
+  background: #fff;
+  color: #1b2430;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  background: #f3f5f8;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-sm {
+  height: 28px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.btn-primary {
+  background: #1b2430;
+  border-color: #1b2430;
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #2b3748;
+}
+.btn-danger {
+  background: #b3261e;
+  border-color: #b3261e;
+  color: #fff;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #92201a;
+}
+.input {
+  padding: 6px 8px;
+  border: 1px solid #d5d9e0;
+  border-radius: 6px;
+  font: inherit;
+}
+.note {
+  color: #4a5563;
+  font-size: 14px;
+}
+.muted {
+  color: #6b7683;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #4a5563;
+  padding: 12px 0;
+}
+.banner {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.banner-alert {
+  background: #fdecea;
+  color: #8c1d18;
+}
+.banner-success {
+  background: #e7f6ec;
+  color: #1e6b38;
+}
+.spin {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #d5d9e0;
+  border-top-color: #1b2430;
+  border-radius: 50%;
+  animation: legacy-spin 0.8s linear infinite;
+}
+@keyframes legacy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
