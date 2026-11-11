@@ -121,6 +121,7 @@ export const CONFIG_FIELDS: FieldDef[] = [
   { key: 'iconSize', label: 'Icon size', type: 'enum', group: 'Kiosk appearance', enforced: true, kioskOnly: true, help: 'App icon size in the kiosk launcher.', options: [
     { value: 'SMALL', label: 'Small' }, { value: 'MEDIUM', label: 'Medium' }, { value: 'LARGE', label: 'Large' },
   ] },
+  { key: 'backgroundImageUrl', label: 'Background picture', type: 'text', group: 'Kiosk appearance', enforced: true, kioskOnly: true, help: 'Background image of the MDMesh kiosk launcher: paste an image URL or upload a picture.' },
 
   // ── Network ───────────────────────────────────────────────────────────────
   { key: 'wifi', label: 'Wi-Fi settings', type: 'tri', group: 'Network', enforced: true, segments: ALLOW_BLOCK, help: WIFI_HELP },
@@ -132,6 +133,7 @@ export const CONFIG_FIELDS: FieldDef[] = [
   { key: 'connectivityMode', label: 'Connectivity', type: 'enum', group: 'Network', enforced: true, help: CONNECTIVITY_HELP, options: [
     { value: 'adaptive', label: 'Battery-saver' }, { value: 'alwaysOn', label: 'Always-on' },
   ] },
+  { key: 'dns', label: 'Private DNS host', type: 'text', group: 'Network', enforced: true, help: 'Global private DNS hostname (e.g. dns.google, one.one.one.one, dns.adguard-dns.com). Needs device owner; leave empty to keep the device default.' },
   { key: 'mobileData', label: 'Mobile data', type: 'tri', group: 'Network', help: 'Headwind launcher switched mobile data (needed system-app rights).' },
   { key: 'gps', label: 'GPS / location', type: 'tri', group: 'Network', help: 'Headwind launcher switched the location setting.' },
   { key: 'mobileEnrollment', label: 'Enroll over mobile data', type: 'switch', group: 'Network', help: "Read only by Headwind's server QR. The MDMesh enrollment QR ignores it." },
@@ -175,7 +177,6 @@ export const CONFIG_FIELDS: FieldDef[] = [
     { value: 0, label: 'No lock (auto)' }, { value: 1, label: 'Portrait' }, { value: 2, label: 'Landscape' },
   ] },
   { key: 'useDefaultDesignSettings', label: 'Default launcher design', type: 'switch', group: 'Display', help: 'Headwind launcher ignored its custom colors. The MDMesh kiosk always uses Kiosk appearance.' },
-  { key: 'backgroundImageUrl', label: 'Background image URL', type: 'text', group: 'Display', help: 'Headwind launcher wallpaper.' },
   { key: 'desktopHeader', label: 'Launcher header', type: 'enum', group: 'Display', help: 'Header line above the Headwind launcher.', options: [
     { value: 'NO_HEADER', label: 'None' }, { value: 'DEVICE_ID', label: 'Device ID' }, { value: 'DESCRIPTION', label: 'Description' },
     { value: 'CUSTOM1', label: 'Custom 1' }, { value: 'CUSTOM2', label: 'Custom 2' }, { value: 'CUSTOM3', label: 'Custom 3' }, { value: 'TEMPLATE', label: 'Template' },
@@ -211,7 +212,7 @@ export const LEGACY_FIELDS = CONFIG_FIELDS.filter((f) => !f.enforced && !f.metad
 /** Changing any of these re-enters/exits kiosk on every device of the configuration. */
 export const KIOSK_AFFECTING_KEYS: ReadonlySet<string> = new Set([
   'kioskMode', 'mainAppId', 'kioskExit', 'kioskHome', 'kioskRecents', 'kioskNotifications', 'kioskSystemInfo',
-  'kioskKeyguard', 'kioskLockButtons', 'kioskLockVolume', 'password', 'backgroundColor', 'textColor', 'iconSize', 'applications',
+  'kioskKeyguard', 'kioskLockButtons', 'kioskLockVolume', 'password', 'backgroundColor', 'textColor', 'backgroundImageUrl', 'iconSize', 'applications',
 ]);
 
 /**

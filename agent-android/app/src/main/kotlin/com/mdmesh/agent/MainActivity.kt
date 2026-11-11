@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -17,9 +18,14 @@ import androidx.lifecycle.lifecycleScope
 import com.mdmesh.agent.service.CheckInService
 import com.mdmesh.core.action.NotificationPermissionAccess
 import com.mdmesh.core.config.ServerConfigStore
+import com.mdmesh.core.sync.CheckInWorker
+import com.mdmesh.core.kiosk.KioskApplier
+import com.mdmesh.core.store.ConfigStateStore
 import com.mdmesh.core.store.DeviceIdStore
+import com.mdmesh.core.store.KioskStateStore
 import com.mdmesh.core.sync.SyncStatus
 import com.mdmesh.policy.wifi.DpmHandle
+import com.mdmesh.proto.KioskApplyPayload
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -42,9 +48,15 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var notificationPermission: NotificationPermissionAccess
     @Inject lateinit var serverConfig: ServerConfigStore
     @Inject lateinit var syncStatus: SyncStatus
+    @Inject lateinit var eventLog: com.mdmesh.core.telemetry.EventLog
+    @Inject lateinit var kioskApplier: KioskApplier
+    @Inject lateinit var kioskStateStore: KioskStateStore
+    @Inject lateinit var configStateStore: ConfigStateStore
 
     private lateinit var deviceIdValue: TextView
     private lateinit var kioskValue: TextView
+    private lateinit var screenCaptureStatusValue: TextView
+    private lateinit var debugLogsValue: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,10 +82,37 @@ class MainActivity : ComponentActivity() {
 
     private fun refresh() {
         kioskValue.text = if (isLocked()) "Locked (kiosk active)" else "Not locked"
+        val isCaptureAuthorized = com.mdmesh.remote.MediaProjectionDataStore.projectionData != null
+        if (::screenCaptureStatusValue.isInitialized) {
+            screenCaptureStatusValue.text = if (isCaptureAuthorized) "Authorized — Screen capture permission granted" else "Not authorized"
+            screenCaptureStatusValue.setTextColor(if (isCaptureAuthorized) OK else ALERT)
+        }
         lifecycleScope.launch {
             val id = deviceIdStore.current()
             deviceIdValue.text = if (id.isNullOrBlank()) enrollingLabel() else id
+            updateDebugLogs()
         }
+    }
+
+    private fun updateDebugLogs() {
+        val lastErr = syncStatus.lastError.value
+        val errStr = if (lastErr != null) {
+            val at = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(lastErr.atMillis))
+            "Last Error: ${lastErr.message} ($at)"
+        } else {
+            "Sync: OK"
+        }
+        val recentEvents = eventLog.peekRecent(10)
+        val eventsText = if (recentEvents.isEmpty()) {
+            "No recent device events"
+        } else {
+            recentEvents.joinToString("\n") { ev ->
+                val at = DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(ev.ts))
+                "[$at] ${ev.type}${if (!ev.detail.isNullOrBlank()) ": " + ev.detail else ""}"
+            }
+        }
+        val info = "$errStr\nDevice Owner: ${isDeviceOwner()}\nAgent Version: ${com.mdmesh.agent.BuildConfig.VERSION_NAME}\n\nRecent Device Logs:\n$eventsText"
+        debugLogsValue.text = info
     }
 
     /** "Enrolling…" plus the last sync error (if any), so a stuck enrollment is diagnosable on-device. */
@@ -119,6 +158,39 @@ class MainActivity : ComponentActivity() {
         root.addView(label("KIOSK"))
         kioskValue = text("…", 16f, TEXT)
         root.addView(kioskValue)
+        val enableKioskBtn = Button(this).apply {
+            text = "Enable Kiosk mode"
+            setOnClickListener {
+                lifecycleScope.launch {
+                    val savedPayload = kioskStateStore.load()
+                        ?: configStateStore.load()?.kiosk
+                        ?: KioskApplyPayload()
+                    kioskApplier.enter(savedPayload)
+                    refresh()
+                }
+            }
+        }
+        root.addView(enableKioskBtn)
+        root.addView(spacer())
+
+        root.addView(label("SCREEN CAPTURE"))
+        val isCaptureAuthorized = com.mdmesh.remote.MediaProjectionDataStore.projectionData != null
+        screenCaptureStatusValue = text(
+            if (isCaptureAuthorized) "Authorized — Screen capture permission granted" else "Not authorized",
+            15f,
+            if (isCaptureAuthorized) OK else ALERT,
+        )
+        root.addView(screenCaptureStatusValue)
+        val grantCaptureBtn = Button(this).apply {
+            text = "Grant Screen Capture Permission"
+            setOnClickListener {
+                runCatching {
+                    val intent = Intent(this@MainActivity, com.mdmesh.remote.ScreenCapturePermissionActivity::class.java)
+                    startActivity(intent)
+                }
+            }
+        }
+        root.addView(grantCaptureBtn)
         root.addView(spacer())
 
         root.addView(label("AGENT VERSION"))
@@ -130,10 +202,27 @@ class MainActivity : ComponentActivity() {
                 mono = true,
             ),
         )
+        val checkUpdateBtn = Button(this).apply {
+            text = "Check for updates"
+            setOnClickListener {
+                CheckInWorker.scheduleNow(applicationContext)
+                ContextCompat.startForegroundService(
+                    this@MainActivity,
+                    Intent(this@MainActivity, CheckInService::class.java),
+                )
+                refresh()
+            }
+        }
+        root.addView(checkUpdateBtn)
         root.addView(spacer())
 
         root.addView(label("SERVER"))
         root.addView(text(serverConfig.baseUrl(), 13f, MUTED, mono = true))
+        root.addView(spacer())
+
+        root.addView(label("DEBUG LOGS"))
+        debugLogsValue = text("…", 13f, SIGNAL, mono = true)
+        root.addView(debugLogsValue)
         root.addView(spacer())
 
         root.addView(

@@ -748,7 +748,7 @@ public class FilesResource {
 
     /** Extract every {@code *.apk} entry of a zip container to temp files. If a {@code universal.apk}
      *  is present (bundletool .apks), return ONLY it — it's a self-contained single install. */
-    private List<File> extractApkParts(File zip, Customer customer) throws IOException {
+    List<File> extractApkParts(File zip, Customer customer) throws IOException {
         List<File> parts = new LinkedList<>();
         File universal = null;
         try (java.util.zip.ZipInputStream zin =

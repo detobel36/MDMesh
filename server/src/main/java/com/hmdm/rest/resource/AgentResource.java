@@ -116,6 +116,7 @@ public class AgentResource {
     private com.hmdm.rest.resource.support.RolloutRequeuer rolloutRequeuer;
     private com.hmdm.rest.resource.support.InstallHashes installHashes;
     private com.hmdm.rest.resource.support.KioskLockoutAlert kioskLockoutAlert;
+    private com.hmdm.rest.resource.support.RemoteSessionManager remoteSessionManager;
 
     /**
      * <p>A constructor required by Swagger.</p>
@@ -132,7 +133,8 @@ public class AgentResource {
                          com.hmdm.rest.resource.support.AppReconciler appReconciler,
                          com.hmdm.rest.resource.support.RolloutRequeuer rolloutRequeuer,
                          com.hmdm.rest.resource.support.InstallHashes installHashes,
-                         com.hmdm.rest.resource.support.KioskLockoutAlert kioskLockoutAlert) {
+                         com.hmdm.rest.resource.support.KioskLockoutAlert kioskLockoutAlert,
+                         com.hmdm.rest.resource.support.RemoteSessionManager remoteSessionManager) {
         this.unsecureDAO = unsecureDAO;
         this.tokenDAO = tokenDAO;
         this.commandDAO = commandDAO;
@@ -142,6 +144,7 @@ public class AgentResource {
         this.rolloutRequeuer = rolloutRequeuer;
         this.installHashes = installHashes;
         this.kioskLockoutAlert = kioskLockoutAlert;
+        this.remoteSessionManager = remoteSessionManager;
     }
 
     // =================================================================================================================
@@ -480,6 +483,44 @@ public class AgentResource {
         AgentCheckInResponse response = new AgentCheckInResponse(commands);
         response.setResultsAccepted(resultsAccepted);
         return Response.OK(response);
+    }
+
+    // =================================================================================================================
+    @ApiOperation(value = "Send remote signal from agent", notes = "Agent posts SDP offer/ICE candidate/status signal.")
+    @POST
+    @Path("/remote/session/{sessionId}/signal")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response sendRemoteSignal(@HeaderParam("Authorization") String authorization,
+                                     @javax.ws.rs.PathParam("sessionId") String sessionId,
+                                     JsonNode signal) {
+        com.hmdm.rest.resource.support.RemoteSessionManager.RemoteSession session = remoteSessionManager.findSession(sessionId);
+        if (session == null) {
+            return Response.ERROR("error.agent.session.notFound");
+        }
+        if (!authenticate(authorization, session.getDeviceNumber())) {
+            return Response.ERROR("error.agent.unauthorized");
+        }
+        session.pushAgentSignal(signal);
+        return Response.OK();
+    }
+
+    // =================================================================================================================
+    @ApiOperation(value = "Get remote signals for agent", notes = "Agent polls pending SDP answer/ICE candidate signals from browser.")
+    @javax.ws.rs.GET
+    @Path("/remote/session/{sessionId}/signals")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getRemoteSignals(@HeaderParam("Authorization") String authorization,
+                                     @javax.ws.rs.PathParam("sessionId") String sessionId) {
+        com.hmdm.rest.resource.support.RemoteSessionManager.RemoteSession session = remoteSessionManager.findSession(sessionId);
+        if (session == null) {
+            return Response.ERROR("error.agent.session.notFound");
+        }
+        if (!authenticate(authorization, session.getDeviceNumber())) {
+            return Response.ERROR("error.agent.unauthorized");
+        }
+        List<Object> signals = session.pollBrowserSignals();
+        return Response.OK(signals);
     }
 
     /**

@@ -74,8 +74,15 @@ import com.mdmesh.oem.OemAdapter
 import com.mdmesh.policy.CapabilityRegistry
 import com.mdmesh.policy.wifi.AndroidWifiRadio
 import com.mdmesh.policy.wifi.DpmHandle
+import com.mdmesh.core.command.handlers.RemoteStartSessionHandler
+import com.mdmesh.core.command.handlers.RemoteStopSessionHandler
+import com.mdmesh.core.net.MdmApi
+import com.mdmesh.core.store.DeviceIdentity
+import com.mdmesh.policy.dns.DnsPolicyFactory
 import com.mdmesh.policy.wifi.SharedPrefsWifiRadioOffState
+import com.mdmesh.remote.RemoteControlSession
 import com.mdmesh.remote.RemoteControlTierDetector
+import com.mdmesh.remote.WebRtcRemoteControlSession
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -119,10 +126,8 @@ object AgentModule {
     @Provides
     @Singleton
     fun provideRemoteTierDetector(): RemoteControlTierDetector =
-        // MediaProjection + accessibility probes land with :remote's real impl;
-        // until then advertise tier=none honestly.
         RemoteControlTierDetector(
-            screenCaptureAvailable = false,
+            screenCaptureAvailable = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP,
             inputInjectionAvailable = false,
         )
 
@@ -190,9 +195,9 @@ object AgentModule {
 
     @Provides
     @IntoSet
-    fun providePolicyApplyHandler(registry: CapabilityRegistry): CommandHandler =
+    fun providePolicyApplyHandler(registry: CapabilityRegistry, handle: DpmHandle): CommandHandler =
         // A function, not a map: the toggles are resolved per command (Device Owner arrives after process start, #76).
-        PolicyApplyHandler(registry::togglePolicies)
+        PolicyApplyHandler(registry::togglePolicies, DnsPolicyFactory.create(handle))
 
     @Provides
     @Singleton
@@ -337,6 +342,51 @@ object AgentModule {
     @IntoSet
     fun provideLocationModeHandler(store: LocationModeStore): CommandHandler =
         DeviceLocationModeHandler(store)
+
+    @Provides
+    @Singleton
+    fun provideRemoteControlSession(
+        @ApplicationContext context: Context,
+        identity: DeviceIdentity,
+        api: MdmApi,
+        eventSink: EventSink,
+    ): RemoteControlSession = WebRtcRemoteControlSession(
+        context = context,
+        sendSignal = { dto ->
+            val secret = identity.secret()
+            if (secret != null) {
+                runCatching { api.sendRemoteSignal("Bearer $secret", dto.sessionId, dto) }
+            }
+        },
+        fetchSignals = { sessionId ->
+            val secret = identity.secret()
+            if (secret != null) {
+                val result = runCatching { api.getRemoteSignals("Bearer $secret", sessionId) }.getOrNull()
+                result?.data ?: emptyList()
+            } else {
+                emptyList()
+            }
+        },
+        onEventLog = { type, detail ->
+            eventSink.record(type, detail)
+        },
+    )
+
+    @Provides
+    @IntoSet
+    fun provideRemoteStartSessionHandler(
+        session: RemoteControlSession,
+        eventSink: EventSink,
+    ): CommandHandler =
+        RemoteStartSessionHandler(session, eventSink)
+
+    @Provides
+    @IntoSet
+    fun provideRemoteStopSessionHandler(
+        session: RemoteControlSession,
+        eventSink: EventSink,
+    ): CommandHandler =
+        RemoteStopSessionHandler(session, eventSink)
 
     // --- Desired-state configuration (config.apply) ---
 

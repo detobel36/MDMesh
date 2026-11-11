@@ -24,6 +24,7 @@ import {
   IconDownload,
   IconEnterKiosk,
   IconExitKiosk,
+  IconEye,
   IconFactoryReset,
   IconHistory,
   IconKey,
@@ -405,6 +406,7 @@ export function RemoteActions({
   busy,
   onAction,
   onEnterKiosk,
+  onViewScreen,
   kioskReturn,
   onInstallConfigApps,
   powerMode,
@@ -419,6 +421,8 @@ export function RemoteActions({
   onAction: ActionRunner;
   /** Opens the custom (one-time) kiosk dialog. */
   onEnterKiosk: () => void;
+  /** Opens the live screen view (WebRTC) dialog. */
+  onViewScreen: () => void;
   kioskReturn: KioskReturnOffer;
   onInstallConfigApps: () => void;
   /** Selected connection mode ('alwaysOn' | 'adaptive'), from state or the request just sent. */
@@ -457,6 +461,20 @@ export function RemoteActions({
           tile('lockscreen-message', 'Lock-screen message…', <IconScreenMessage />),
           tile('ring', 'Ring', <IconRing />),
           tile('ring-stop', 'Stop ringing', <IconStopRing />),
+        ]}
+      />
+      <ActionRow
+        title="Screen"
+        sub="Live WebRTC view"
+        busy={busy}
+        tiles={[
+          {
+            key: 'view-screen',
+            label: 'View screen',
+            icon: <IconEye />,
+            title: 'Watch this device’s screen live over WebRTC. The device must allow remote viewing.',
+            run: onViewScreen,
+          },
         ]}
       />
       <ActionRow

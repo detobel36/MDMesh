@@ -7,8 +7,8 @@ const os = require('os');
 const cp = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
-const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, sha256Matches, recoveryPage, isPublishTemp, fetchAsset,
-  envValue, applyLine, applyRefusal, deploymentAdminVerdict, legacyDeploymentAdmin } = require('./lib');
+const { pickRelease, shapeStatus, imageTags, isTerminal, apkAsset, webZipAsset, sha256Matches, recoveryPage, isPublishTemp,
+  fetchAsset, envValue, applyLine, applyRefusal, deploymentAdminVerdict, legacyDeploymentAdmin } = require('./lib');
 
 const PORT = +(process.env.SUPERVISOR_PORT || 9000);
 // Bind address. Docker keeps the default (all interfaces — the container has no published ports);
@@ -46,6 +46,7 @@ let currentVersion = readCurrentVersion();
 let lastManifest = null;
 // Downloadable APK for the latest verified release {version,versionCode,sha256,url,apiUrl}; null if none.
 let lastApk = null;
+let lastWebZip = null;
 // Release notes / link / date for the picked release {notes,url,publishedAt}; null when no release.
 let lastRelease = null;
 // In-flight apply state surfaced via /update/status; null when no apply has run.
@@ -271,6 +272,7 @@ async function poll() {
     const manifest = v.manifest || null;
     lastManifest = manifest; // only verified manifests are ever stored
     lastApk = manifest ? apkAsset(rel, manifest) : null;
+    lastWebZip = manifest ? webZipAsset(rel, manifest) : null;
     setStatus({ current: currentVersion, manifest, verified: !!manifest, checkedAt: Date.now(), error: manifest ? null : v.error });
     if (lastApk) void ensureApk(); // warm the mirror cache (download+verify) so a rollout is instant
   } catch (e) {
@@ -320,7 +322,8 @@ function startApply(trigger) {
 
   apply = { phase: 'authorizing', fromVersion: currentVersion, toVersion, trigger, startedAt: Date.now(), finishedAt: null, error: null };
   state.apply = apply;
-  spawnPhases([APPLY_SCRIPT, toVersion], (code, final) => {
+  const webZipUrl = lastWebZip ? lastWebZip.url : '';
+  spawnPhases([APPLY_SCRIPT, toVersion, webZipUrl], (code, final) => {
     // .env is the record of what is running now: toVersion on success, the restored version after apply.sh rolled back.
     currentVersion = readCurrentVersion(code === 0 ? toVersion : currentVersion);
     // apply.sh exits non-zero after any failure, ending at rolled_back or failed.

@@ -25,6 +25,10 @@ dependencies {
     api(project(":proto"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.webrtc.android)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.serialization)
+    implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
 }

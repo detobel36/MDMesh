@@ -2,6 +2,7 @@ package com.mdmesh.agent
 
 import android.app.ActivityManager
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -35,7 +36,9 @@ import com.mdmesh.kiosk.KioskController
 import com.mdmesh.kiosk.KioskReturnPolicy
 import com.mdmesh.proto.KioskApplyPayload
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -234,10 +237,11 @@ class KioskLauncherActivity : ComponentActivity() {
     private fun splashView(p: KioskApplyPayload): View {
         val bg = parseColor(p.theme.backgroundColor, INK)
         val fg = parseColor(p.theme.textColor, TEXT)
-        return frame(bg).apply {
-            addView(centeredText("Loading…", 18f, fg))
-            addExitAffordance(p, this)
-        }
+        val root = frame(bg)
+        applyBackgroundImage(root, p.theme.backgroundImageUrl)
+        root.addView(centeredText("Loading…", 18f, fg))
+        addExitAffordance(p, root)
+        return root
     }
 
     private fun launcherGrid(p: KioskApplyPayload): View {
@@ -280,6 +284,7 @@ class KioskLauncherActivity : ComponentActivity() {
         column.addView(grid)
 
         val root = frame(bg)
+        applyBackgroundImage(root, p.theme.backgroundImageUrl)
         root.addView(
             ScrollView(this).apply {
                 addView(column)
@@ -288,6 +293,30 @@ class KioskLauncherActivity : ComponentActivity() {
         )
         addExitAffordance(p, root)
         return root
+    }
+
+    private fun applyBackgroundImage(parent: android.widget.FrameLayout, urlStr: String?) {
+        if (urlStr.isNullOrBlank()) return
+        val iv = ImageView(this).apply {
+            layoutParams = android.widget.FrameLayout.LayoutParams(MATCH, MATCH)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        parent.addView(iv, 0)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val bitmap = runCatching {
+                val conn = java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                conn.inputStream.use { stream ->
+                    BitmapFactory.decodeStream(stream)
+                }
+            }.getOrNull()
+            if (bitmap != null) {
+                withContext(Dispatchers.Main) {
+                    iv.setImageBitmap(bitmap)
+                }
+            }
+        }
     }
 
     private fun appCell(

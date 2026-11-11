@@ -12,6 +12,7 @@ import { getConfigStatus, summarizeStatus, type ConfigStatus } from '../api/conf
 import {
   forceSync,
   getDeviceState,
+  installApp,
   listCommandHistory,
   queueCommand,
   syncConfigApps,
@@ -20,6 +21,7 @@ import {
   type DeviceState,
   type QueueCommandRequest,
 } from '../api/commands';
+import { getUpdateStatus, type UpdateStatus } from '../api/updates';
 import { getEvents, type DeviceEvent } from '../api/events';
 import { listLocations, type LocationFix } from '../api/deviceLocations';
 import { getConfiguration, getConfigurationApps, type ConfigApp, type Configuration } from '../api/configurations';
@@ -57,6 +59,7 @@ import { ActionDialog, CommandsCard, ConfigPanel, RemoteActions, TEMPLATE, type 
 import { ActivityTab, LocationTab, TelemetryTab } from './DeviceDetailTabs';
 import { AppsTab, useAppScan } from './DeviceDetailApps';
 import { ConfiguredKioskDialog, DeviceKioskDialog } from './DeviceKioskDialog';
+import { ScreenViewModal } from '../components/ScreenViewModal';
 import { CORE_ACTION_ACCESS } from '../ext/core/access';
 import { withCoreParts } from '../ext/core/device';
 import { usePermission } from '../ext/permissions';
@@ -251,6 +254,7 @@ export function DeviceDetailPage() {
   const [dsLoaded, setDsLoaded] = useState(false);
   const [cfgStatus, setCfgStatus] = useState<ConfigStatus | null>(null);
   const [cfgLoaded, setCfgLoaded] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [history, setHistory] = useState<CommandHistoryItem[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [events, setEvents] = useState<DeviceEvent[]>([]);
@@ -276,6 +280,7 @@ export function DeviceDetailPage() {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<CommandTemplateExt | null>(null);
   const [kioskOpen, setKioskOpen] = useState(false);
+  const [screenOpen, setScreenOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [powerRequested, setPowerRequested] = useState<string | null>(null);
   const [locationRequested, setLocationRequested] = useState<string | null>(null);
@@ -377,6 +382,7 @@ export function DeviceDetailPage() {
     setLocationRequested(null);
     setDialog(null);
     setKioskOpen(false);
+    setScreenOpen(false);
     setReturnOpen(false);
     setConfiguredIds(number ? configuredKioskIds(number) : new Set());
   }, [number]);
@@ -429,6 +435,12 @@ export function DeviceDetailPage() {
             if (!on) return;
             setEvents(Array.isArray(v) ? v : []);
             setEventsLoaded(true);
+          })
+          .catch(() => undefined),
+        getUpdateStatus()
+          .then((v) => {
+            if (!on) return;
+            setUpdateStatus(v);
           })
           .catch(() => undefined),
       ]);
@@ -596,8 +608,32 @@ export function DeviceDetailPage() {
     }
   }
 
-  async function installConfigApps() {
-    if (!number) return;
+  /** Push the agent APK the supervisor mirrors for the latest release (fork feature: manual agent update). */
+  async function updateAgent() {
+    if (!number || !updateStatus?.apk?.available) return;
+    const apk = updateStatus.apk;
+    const pkg = (import.meta.env.VITE_AGENT_PACKAGE as string | undefined) || 'com.mdmesh.agent';
+    setBusy(true);
+    try {
+      const url = `${window.location.origin}/update/agent.apk?v=${apk.versionCode}`;
+      await installApp(number, {
+        url,
+        packageName: pkg,
+        versionCode: apk.versionCode,
+        sha256: apk.sha256,
+        runAfterInstall: false,
+      });
+      await forceSync(number).catch(() => undefined);
+      toast.push('ok', 'Agent update queued', `Updating agent to v${apk.version}`);
+      refresh();
+    } catch (e) {
+      toast.push('err', 'Agent update failed', e instanceof Error ? e.message : '');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function installConfigApps() {    if (!number) return;
     setBusy(true);
     try {
       const res = await syncConfigApps(number);
@@ -891,7 +927,21 @@ export function DeviceDetailPage() {
   const managementItems: KeyValueItem[] = [
     { key: 'cfg', label: 'Configuration', value: configName ?? DASH },
     // The agent's own report only: device.launcherVersion is the configuration's main-app version.
-    { key: 'agent', label: 'Agent', value: ds?.agentVersion || DASH, mono: !!ds?.agentVersion },
+    {
+      key: 'agent',
+      label: 'Agent',
+      value: (
+        <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <span>{ds?.agentVersion || DASH}</span>
+          {updateStatus?.apk?.available ? (
+            <Button size="xs" onClick={() => void updateAgent()} disabled={busy}>
+              Update to v{updateStatus.apk.version}
+            </Button>
+          ) : null}
+        </span>
+      ),
+      mono: false,
+    },
     { key: 'mdm', label: 'MDM mode', value: ownerSource == null ? DASH : ownerSource ? 'Device owner' : 'Not device owner' },
     { key: 'enrolled', label: 'Enrolled', value: device.enrollTime ? fmtDateTime(device.enrollTime) : DASH },
   ];
@@ -933,6 +983,7 @@ export function DeviceDetailPage() {
                 busy={busy || wiped}
                 onAction={runAction}
                 onEnterKiosk={() => setKioskOpen(true)}
+                onViewScreen={() => setScreenOpen(true)}
                 kioskReturn={kioskReturn}
                 onInstallConfigApps={() => void installConfigApps()}
                 powerMode={powerShown}
@@ -1113,6 +1164,9 @@ export function DeviceDetailPage() {
       ) : null}
       {kioskOpen ? (
         <DeviceKioskDialog device={device} configName={configName} onClose={() => setKioskOpen(false)} onQueued={refresh} />
+      ) : null}
+      {screenOpen ? (
+        <ScreenViewModal deviceNumber={device.number} onClose={() => setScreenOpen(false)} />
       ) : null}
       {returnOpen && kiosk ? (
         <ConfiguredKioskDialog

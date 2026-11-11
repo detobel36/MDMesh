@@ -8,6 +8,7 @@ import com.hmdm.persistence.UnsecureDAO;
 import com.hmdm.persistence.domain.AgentCommand;
 import com.hmdm.persistence.domain.Application;
 import com.hmdm.persistence.domain.ApplicationVersion;
+import com.hmdm.persistence.domain.Configuration;
 import com.hmdm.persistence.domain.Device;
 import com.hmdm.util.InstallIntegrity;
 import org.junit.Before;
@@ -60,6 +61,7 @@ public class ConfigAppInstallerTest {
         final List<Application> apps = new ArrayList<>();
         final Map<Integer, ApplicationVersion> versions = new HashMap<>();
         final Map<Integer, String> savedHashes = new HashMap<>();
+        Configuration configuration;
 
         FakeUnsecureDAO() {
             super(null, null, null, null, null, null, null, null, null, null, null, null, null, null,
@@ -69,6 +71,7 @@ public class ConfigAppInstallerTest {
         @Override public List<Application> getPlainConfigurationApplications(Integer customerId, Integer id) { return apps; }
         @Override public ApplicationVersion findApplicationVersionById(Integer id) { return versions.get(id); }
         @Override public void saveApkFileHash(Integer appVersionId, String hashValue) { savedHashes.put(appVersionId, hashValue); }
+        @Override public Configuration getConfigurationById(Integer id) { return configuration; }
     }
 
     private static final class FakeCommandDAO extends AgentCommandDAO {
@@ -185,5 +188,19 @@ public class ConfigAppInstallerTest {
         assertEquals(HEX, parts.get(1).get("sha256").asText());
         assertEquals(1, resolver.asked.size());
         assertTrue(dao.savedHashes.isEmpty());
+    }
+
+    @Test
+    public void configurationDnsIsQueuedAsAPolicyApply() throws Exception {
+        Configuration cfg = new Configuration();
+        cfg.setId(5);
+        cfg.setDns("dns.google");
+        dao.configuration = cfg;
+
+        assertEquals(1, installer.enqueueConfigApps(device));
+        AgentCommand c = commands.inserted.get(0);
+        assertEquals("policy.apply", c.getType());
+        assertEquals("policy.dns", c.getRequiresCapability());
+        assertEquals("dns.google", M.readTree(c.getPayload()).get("value").asText());
     }
 }

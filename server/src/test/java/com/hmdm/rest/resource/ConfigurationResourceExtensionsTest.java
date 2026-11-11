@@ -75,7 +75,7 @@ public class ConfigurationResourceExtensionsTest {
     private ConfigurationResource resource;
 
     private ConfigurationResource resource(ExtensionPoints extensionPoints) {
-        return new ConfigurationResource(dao, null, new PushService(null, null, null, null, false), null, null,
+        return new ConfigurationResource(dao, null, new PushService(null, null, null, null, false), null, null, null, null,
                 "https://mdm.example.com", extensionPoints);
     }
 
