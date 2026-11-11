@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { Application } from '../api/applications';
-import { IconAndroid, IconLibrary, IconUpload, LinkTabs, PageHeader, useToast } from '../ui';
+import { Button, IconAndroid, IconLibrary, IconUpload, LinkTabs, PageHeader, useToast } from '../ui';
 import { AppsCustom } from './AppsCustom';
+import { FetchFromDevicesModal } from '../components/FetchFromDevicesModal';
 import { canDeploy, resolveApp, type DeployModes, type DeploySubject } from '../data/apps';
 import { DeployModal } from '../ui/DeployModal';
 import { CORE_ACTION_ACCESS } from '../ext/core/access';
@@ -42,6 +43,7 @@ export function AppsPage() {
   const sources: Sources = { custom: canAdd || mayDeploy, fdroid: canAdd || mayDeploy };
   const source = sourceFrom(params.get('source'), sources);
   const [deploy, setDeploy] = useState<DeploySubject | null>(null);
+  const [fetchOpen, setFetchOpen] = useState(false);
   const [deployingId, setDeployingId] = useState<number | null>(null);
   const { usedIn, invalidate: invalidateUsedIn } = useUsedIn(library.apps, source === 'library');
   // Bumped when the source tab changes, so a Deploy still resolving on the Library tab doesn't open its dialog
@@ -110,7 +112,15 @@ export function AppsPage() {
 
   return (
     <>
-      <PageHeader title="Apps" subtitle="Apps in the library can be added to a configuration or pushed straight to devices." />
+      <PageHeader
+        title="Apps"
+        subtitle="Apps in the library can be added to a configuration or pushed straight to devices."
+        actions={
+          <Button onClick={() => setFetchOpen(true)} title="Scan installed apps on managed devices and import the missing ones">
+            Fetch from devices
+          </Button>
+        }
+      />
 
       {source === 'library' ? (
         <AppsLibrary
@@ -139,6 +149,14 @@ export function AppsPage() {
       )}
 
       {deploy && deployOpen ? <DeployModal subject={deploy} modes={deployModes} onClose={() => setDeploy(null)} onAssigned={assigned} /> : null}
+      {fetchOpen ? (
+        <FetchFromDevicesModal
+          onClose={() => setFetchOpen(false)}
+          onDone={() => {
+            library.reload();
+          }}
+        />
+      ) : null}
     </>
   );
 }
