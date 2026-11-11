@@ -59,6 +59,7 @@ export interface Configuration {
   name: string;
   description?: string;
   qrCodeKey?: string;
+  dns?: string | null;
   applications?: ConfigApp[];
   /**
    * Server plugins' and extensions' data by namespace (an extension id, or `<id>.<name>`), each a JSON object. The
