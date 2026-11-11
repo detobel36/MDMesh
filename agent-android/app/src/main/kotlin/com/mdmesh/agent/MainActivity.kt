@@ -25,6 +25,7 @@ import com.mdmesh.agent.service.CheckInService
 import com.mdmesh.core.action.NotificationPermissionAccess
 import com.mdmesh.core.config.ServerConfigStore
 import com.mdmesh.core.config.ConfigApplier
+import com.mdmesh.core.kiosk.KioskApplier
 import com.mdmesh.core.store.ConfigStateStore
 import com.mdmesh.core.store.configuredKiosk
 import com.mdmesh.core.store.DeviceIdStore
@@ -64,6 +65,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var configApplier: ConfigApplier
     @Inject lateinit var configStore: ConfigStateStore
     @Inject lateinit var kioskStore: KioskStateStore
+    @Inject lateinit var kioskApplier: KioskApplier
     @Inject lateinit var events: EventLog
 
     private lateinit var deviceIdValue: TextView
@@ -211,6 +213,27 @@ class MainActivity : ComponentActivity() {
         root.addView(label("KIOSK"))
         kioskValue = text("…", 16f, TEXT)
         root.addView(kioskValue)
+        root.addView(
+            Button(this).apply {
+                text = "Enable Kiosk mode"
+                isAllCaps = false
+                setOnClickListener {
+                    lifecycleScope.launch {
+                        val payload = kioskStore.load() ?: configStore.configuredKiosk() ?: KioskApplyPayload()
+                        val result = kioskApplier.enter(payload)
+                        if (result !is KioskResult.Ok) {
+                            val message = when (result) {
+                                KioskResult.Unsupported -> "Kiosk is not supported on this device."
+                                is KioskResult.Failed -> result.reason
+                                else -> "Could not enable kiosk."
+                            }
+                            Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+                        }
+                        refresh()
+                    }
+                }
+            },
+        )
         returnButton = kioskReturnButton()
         root.addView(returnButton)
         root.addView(spacer())
